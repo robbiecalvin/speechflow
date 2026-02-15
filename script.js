@@ -1,9 +1,691 @@
 let activeBubble = null;
+const sidebarEl = document.getElementById('sidebar');
+
+function getSidebarWidth() {
+  if (!sidebarEl) return 280;
+  return sidebarEl.getBoundingClientRect().width;
+}
+
+function getWorkspaceWidth() {
+  return Math.max(window.innerWidth - getSidebarWidth(), 1);
+}
+
+function getWorkspaceCenterWorld() {
+  return {
+    x: camX + getWorkspaceWidth() / 2 / zoom,
+    y: camY + window.innerHeight / 2 / zoom
+  };
+}
+
+function screenToWorldX(clientX) {
+  return camX + (clientX - getSidebarWidth()) / zoom;
+}
+
+function clampBubbleToWorkspace(data) {
+  if (data.x < camX) {
+    data.x = camX;
+  }
+}
+
+function clampCameraToWorkspace() {
+  if (!bubbles.length) return;
+  const leftmostBubbleX = Math.min(...bubbles.map((b) => b.x));
+  if (camX > leftmostBubbleX) {
+    camX = leftmostBubbleX;
+  }
+}
 
 function highlightBubble(bubbleEl) {
   document.querySelectorAll('.bubble').forEach(b => b.classList.remove('active'));
   if (bubbleEl) bubbleEl.classList.add('active');
 }
+
+function getBubbleDisplayText(bubbleData) {
+  return (bubbleData.textEl?.textContent || '').trim();
+}
+
+const ALLOWED_BUBBLE_TYPES = ['idea', 'task', 'question', 'blocker', 'note'];
+const DEFAULT_BUBBLE_TYPE_LABELS = {
+  idea: 'Idea',
+  task: 'Task',
+  question: 'Question',
+  blocker: 'Blocker',
+  note: 'Note'
+};
+let bubbleTypeLabels = { ...DEFAULT_BUBBLE_TYPE_LABELS };
+let bubbleTypesLocked = false;
+let mapName = 'Untitled Map';
+let isBubbleColumnCollapsed = false;
+let collapsedAudioStep = 0;
+let mapDatabase = [];
+let activeMapId = null;
+const bubbleTypeInputs = {
+  idea: document.getElementById('bubbleTypeIdea'),
+  task: document.getElementById('bubbleTypeTask'),
+  question: document.getElementById('bubbleTypeQuestion'),
+  blocker: document.getElementById('bubbleTypeBlocker'),
+  note: document.getElementById('bubbleTypeNote')
+};
+const saveBubbleTypesBtn = document.getElementById('saveBubbleTypes');
+const sidebarColumnsEl = document.getElementById('sidebarColumns');
+const floatingMapNameEl = document.getElementById('floatingMapName');
+const newMapBtn = document.getElementById('newMapBtn');
+const mapHistoryBtn = document.getElementById('mapHistoryBtn');
+const exportMapIconBtn = document.getElementById('exportMapIconBtn');
+const importMapIconBtn = document.getElementById('importMapIconBtn');
+const toggleBubbleColumnBtn = document.getElementById('toggleBubbleColumn');
+const mapSetupModal = document.getElementById('mapSetupModal');
+const mapNameInput = document.getElementById('mapNameInput');
+const closeMapSetupBtn = document.getElementById('closeMapSetup');
+const mapSetupError = document.getElementById('mapSetupError');
+const mapHistoryModal = document.getElementById('mapHistoryModal');
+const mapHistoryList = document.getElementById('mapHistoryList');
+const closeMapHistoryBtn = document.getElementById('closeMapHistory');
+const promptModal = document.getElementById('promptModal');
+const promptModalInput = document.getElementById('promptModalInput');
+const promptModalError = document.getElementById('promptModalError');
+const promptModalCreateBtn = document.getElementById('promptModalCreate');
+const promptModalCancelBtn = document.getElementById('promptModalCancel');
+const audioExpandedControls = document.getElementById('audioExpandedControls');
+const audioSingleToggle = document.getElementById('audioSingleToggle');
+const audioPlayStopToggle = document.getElementById('audioPlayStopToggle');
+const audioPauseResumeToggle = document.getElementById('audioPauseResumeToggle');
+const audioPlayStopIcon = audioPlayStopToggle?.querySelector('.btn-icon');
+const audioPlayStopLabel = audioPlayStopToggle?.querySelector('.btn-label');
+const audioPauseResumeIcon = audioPauseResumeToggle?.querySelector('.btn-icon');
+const audioPauseResumeLabel = audioPauseResumeToggle?.querySelector('.btn-label');
+const audioSingleIcon = audioSingleToggle?.querySelector('.btn-icon');
+const audioSingleLabel = audioSingleToggle?.querySelector('.btn-label');
+const bubbleEditorModal = document.getElementById('bubbleEditorModal');
+const bubbleEditorMeta = document.getElementById('bubbleEditorMeta');
+const bubbleEditorInputArea = document.getElementById('bubbleEditorInputArea');
+const bubbleEditorInputLabel = document.getElementById('bubbleEditorInputLabel');
+const bubbleEditorTextInput = document.getElementById('bubbleEditorTextInput');
+const bubbleEditorTypeSelect = document.getElementById('bubbleEditorTypeSelect');
+const bubbleEditorOrderInput = document.getElementById('bubbleEditorOrderInput');
+const bubbleEditorError = document.getElementById('bubbleEditorError');
+const bubbleEditorApply = document.getElementById('bubbleEditorApply');
+const bubbleEditorClose = document.getElementById('bubbleEditorClose');
+let bubbleEditorState = { bubbleData: null, action: null };
+
+function titleCaseFirst(input) {
+  if (!input) return input;
+  return input.charAt(0).toUpperCase() + input.slice(1);
+}
+
+function setMapName(nextName) {
+  mapName = (nextName || '').trim() || 'Untitled Map';
+  if (floatingMapNameEl) floatingMapNameEl.textContent = mapName;
+}
+
+function generateMapId() {
+  return `map_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function loadMapDatabase() {
+  try {
+    const raw = localStorage.getItem('mapDatabase');
+    mapDatabase = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(mapDatabase)) mapDatabase = [];
+  } catch (err) {
+    mapDatabase = [];
+  }
+}
+
+function saveMapDatabase() {
+  localStorage.setItem('mapDatabase', JSON.stringify(mapDatabase));
+}
+
+function upsertCurrentMapRecord() {
+  if (!activeMapId || !undoStack.length) return;
+  const latestSnapshot = undoStack[undoStack.length - 1];
+  const idx = mapDatabase.findIndex((m) => m.id === activeMapId);
+  const record = {
+    id: activeMapId,
+    name: mapName,
+    snapshot: latestSnapshot,
+    updatedAt: Date.now()
+  };
+  if (idx >= 0) mapDatabase[idx] = record;
+  else mapDatabase.push(record);
+  saveMapDatabase();
+}
+
+function renderMapHistoryList() {
+  if (!mapHistoryList) return;
+  mapHistoryList.innerHTML = '';
+  const sorted = [...mapDatabase].sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!sorted.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-meta';
+    empty.textContent = 'No saved maps yet.';
+    mapHistoryList.appendChild(empty);
+    return;
+  }
+  sorted.forEach((record) => {
+    const row = document.createElement('div');
+    row.className = 'history-item';
+
+    const metaWrap = document.createElement('div');
+    const nameEl = document.createElement('div');
+    nameEl.className = 'history-name';
+    nameEl.textContent = record.name || 'Untitled Map';
+    const dateEl = document.createElement('div');
+    dateEl.className = 'history-meta';
+    dateEl.textContent = new Date(record.updatedAt).toLocaleString();
+    metaWrap.appendChild(nameEl);
+    metaWrap.appendChild(dateEl);
+
+    const loadBtn = document.createElement('button');
+    loadBtn.type = 'button';
+    loadBtn.textContent = 'Load';
+    loadBtn.addEventListener('click', () => {
+      activeMapId = record.id;
+      restoreStateFromSnapshot(record.snapshot);
+      closeMapHistoryModal();
+      saveSnapshot();
+    });
+
+    row.appendChild(metaWrap);
+    row.appendChild(loadBtn);
+    mapHistoryList.appendChild(row);
+  });
+}
+
+function clearMapData() {
+  document.querySelectorAll('.bubble').forEach((b) => b.remove());
+  bubbles.length = 0;
+  connections.length = 0;
+  activeBubble = null;
+  pendingConnectionFrom = null;
+  selectedBubble = null;
+  playbackActive = false;
+  playbackPaused = false;
+  orderedPlayback = [];
+  playbackIndex = 0;
+  window.speechSynthesis.cancel();
+  updateAudioControlsUI();
+  updateSidebar();
+}
+
+function normalizeBubbleTypeLabel(label, fallback) {
+  const trimmed = (label || '').trim();
+  return trimmed || fallback;
+}
+
+function getBubbleTypeLabel(type) {
+  return bubbleTypeLabels[type] || DEFAULT_BUBBLE_TYPE_LABELS[type] || titleCaseFirst(type);
+}
+
+function refreshBubbleTypeSelectOptions() {
+  if (!bubbleEditorTypeSelect) return;
+  Array.from(bubbleEditorTypeSelect.options).forEach((opt) => {
+    opt.textContent = getBubbleTypeLabel(opt.value);
+  });
+}
+
+function setBubbleTypesLocked(locked) {
+  bubbleTypesLocked = !!locked;
+  ALLOWED_BUBBLE_TYPES.forEach((type) => {
+    if (bubbleTypeInputs[type]) bubbleTypeInputs[type].disabled = bubbleTypesLocked;
+  });
+  if (saveBubbleTypesBtn) {
+    saveBubbleTypesBtn.disabled = bubbleTypesLocked;
+    saveBubbleTypesBtn.textContent = bubbleTypesLocked ? 'Bubble Types Saved' : 'Save Bubble Types';
+  }
+}
+
+function applyBubbleTypeConfig(config = {}) {
+  const nextLabels = config.labels || {};
+  const usePlaceholders = !!config.usePlaceholders;
+  ALLOWED_BUBBLE_TYPES.forEach((type) => {
+    const fallback = DEFAULT_BUBBLE_TYPE_LABELS[type];
+    const nextValue = normalizeBubbleTypeLabel(nextLabels[type], fallback);
+    bubbleTypeLabels[type] = nextValue;
+    if (bubbleTypeInputs[type]) {
+      bubbleTypeInputs[type].value = usePlaceholders ? '' : nextValue;
+    }
+  });
+  setBubbleTypesLocked(!!config.locked);
+  refreshBubbleTypeSelectOptions();
+}
+
+function saveConfiguredBubbleTypes(saveHistory = true) {
+  if (bubbleTypesLocked) return;
+  ALLOWED_BUBBLE_TYPES.forEach((type) => {
+    const fallback = DEFAULT_BUBBLE_TYPE_LABELS[type];
+    bubbleTypeLabels[type] = normalizeBubbleTypeLabel(bubbleTypeInputs[type]?.value, fallback);
+    if (bubbleTypeInputs[type]) bubbleTypeInputs[type].value = bubbleTypeLabels[type];
+  });
+  setBubbleTypesLocked(true);
+  refreshBubbleTypeSelectOptions();
+  if (saveHistory) saveSnapshot();
+}
+
+function updateBubbleColumnLayout() {
+  if (!sidebarColumnsEl) return;
+  sidebarColumnsEl.classList.toggle('collapsed', isBubbleColumnCollapsed);
+  if (sidebarEl) {
+    sidebarEl.classList.toggle('collapsed', isBubbleColumnCollapsed);
+  }
+  if (toggleBubbleColumnBtn) {
+    const icon = toggleBubbleColumnBtn.querySelector('.btn-icon');
+    if (icon) icon.textContent = isBubbleColumnCollapsed ? '▸' : '◂';
+  }
+  updateAudioControlsUI();
+}
+
+function updateAudioControlsUI() {
+  if (!audioExpandedControls || !audioSingleToggle) return;
+  if (isBubbleColumnCollapsed) {
+    audioExpandedControls.classList.add('hidden');
+    audioSingleToggle.classList.remove('hidden');
+    if (audioSingleLabel) audioSingleLabel.textContent = 'Play / Pause / Resume / Stop';
+    if (audioSingleIcon) {
+      if (collapsedAudioStep === 0) audioSingleIcon.textContent = '▶️';
+      else if (collapsedAudioStep === 1) audioSingleIcon.textContent = '⏸';
+      else if (collapsedAudioStep === 2) audioSingleIcon.textContent = '⏵';
+      else audioSingleIcon.textContent = '⏹';
+    }
+    return;
+  }
+
+  audioExpandedControls.classList.remove('hidden');
+  audioSingleToggle.classList.add('hidden');
+
+  if (!playbackActive) {
+    if (audioPlayStopIcon) audioPlayStopIcon.textContent = '▶️';
+    if (audioPlayStopLabel) audioPlayStopLabel.textContent = 'Play';
+    if (audioPauseResumeIcon) audioPauseResumeIcon.textContent = '⏸';
+    if (audioPauseResumeLabel) audioPauseResumeLabel.textContent = 'Pause';
+    audioPauseResumeToggle.disabled = true;
+    return;
+  }
+
+  if (audioPlayStopIcon) audioPlayStopIcon.textContent = '⏹';
+  if (audioPlayStopLabel) audioPlayStopLabel.textContent = 'Stop';
+  audioPauseResumeToggle.disabled = false;
+  if (audioPauseResumeIcon) audioPauseResumeIcon.textContent = playbackPaused ? '▶️' : '⏸';
+  if (audioPauseResumeLabel) audioPauseResumeLabel.textContent = playbackPaused ? 'Resume' : 'Pause';
+}
+
+function openMapSetupModal(prefillFromCurrent = false) {
+  if (!mapSetupModal) return;
+  mapSetupError.classList.add('hidden');
+  mapSetupError.textContent = '';
+  mapNameInput.value = prefillFromCurrent ? mapName : '';
+  ALLOWED_BUBBLE_TYPES.forEach((type) => {
+    if (bubbleTypeInputs[type]) {
+      bubbleTypeInputs[type].value = prefillFromCurrent ? getBubbleTypeLabel(type) : '';
+      bubbleTypeInputs[type].disabled = false;
+    }
+  });
+  bubbleTypesLocked = false;
+  if (saveBubbleTypesBtn) {
+    saveBubbleTypesBtn.disabled = false;
+    saveBubbleTypesBtn.textContent = 'Save Bubble Types';
+  }
+  mapSetupModal.classList.remove('hidden');
+  mapSetupModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeMapSetupModal() {
+  if (!mapSetupModal) return;
+  mapSetupModal.classList.add('hidden');
+  mapSetupModal.setAttribute('aria-hidden', 'true');
+}
+
+function openMapHistoryModal() {
+  if (!mapHistoryModal) return;
+  renderMapHistoryList();
+  mapHistoryModal.classList.remove('hidden');
+  mapHistoryModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeMapHistoryModal() {
+  if (!mapHistoryModal) return;
+  mapHistoryModal.classList.add('hidden');
+  mapHistoryModal.setAttribute('aria-hidden', 'true');
+}
+
+function openPromptModal() {
+  if (!promptModal) return;
+  promptModal.classList.remove('hidden');
+  promptModal.setAttribute('aria-hidden', 'false');
+  promptModalError.classList.add('hidden');
+  promptModalError.textContent = '';
+  promptModalInput.value = '';
+  promptModalInput.focus();
+}
+
+function closePromptModal() {
+  if (!promptModal) return;
+  promptModal.classList.add('hidden');
+  promptModal.setAttribute('aria-hidden', 'true');
+}
+
+function createFromPromptText(prompt) {
+  const text = (prompt || '').trim();
+  if (!text) {
+    promptModalError.textContent = 'Type something first.';
+    promptModalError.classList.remove('hidden');
+    return;
+  }
+
+  const center = getWorkspaceCenterWorld();
+  const centerX = center.x;
+  const centerY = center.y;
+  const centerBubble = createBubble(text, centerX, centerY, 'idea');
+
+  const related = [
+    `Why is "${text}" important?`,
+    `How does "${text}" affect others?`,
+    `What comes after "${text}"?`,
+    `Obstacles to "${text}"`,
+    `Steps to achieve "${text}"`
+  ];
+
+  shuffleArray(related);
+  const count = Math.floor(Math.random() * 3) + 3;
+
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 / count) * i;
+    const radius = 220;
+    const x = centerX + Math.cos(angle) * radius;
+    const y = centerY + Math.sin(angle) * radius;
+    const childBubble = createBubble(related[i], x, y, 'question');
+    connections.push({ from: centerBubble, to: childBubble, label: '' });
+  }
+
+  updateSidebar();
+  saveSnapshot();
+  closePromptModal();
+}
+
+function createNewMapFromSetup() {
+  const proposedMapName = (mapNameInput?.value || '').trim();
+  if (!proposedMapName) {
+    mapSetupError.textContent = 'Map name is required.';
+    mapSetupError.classList.remove('hidden');
+    return;
+  }
+  const configuredLabels = {};
+  ALLOWED_BUBBLE_TYPES.forEach((type) => {
+    configuredLabels[type] = normalizeBubbleTypeLabel(
+      bubbleTypeInputs[type]?.value,
+      DEFAULT_BUBBLE_TYPE_LABELS[type]
+    );
+  });
+  setMapName(proposedMapName);
+  activeMapId = generateMapId();
+  undoStack = [];
+  redoStack = [];
+  localStorage.removeItem('bubbleHistory');
+  clearMapData();
+  applyBubbleTypeConfig({ labels: configuredLabels, locked: true, usePlaceholders: false });
+  closeMapSetupModal();
+  saveSnapshot();
+}
+
+function setBubbleType(data, newType) {
+  if (!ALLOWED_BUBBLE_TYPES.includes(newType)) return;
+  data.type = newType;
+  data.el.className = `bubble ${newType}`;
+  data.el.classList.toggle('locked', !!data.locked);
+  if (activeBubble === data) data.el.classList.add('active');
+}
+
+function removeBubble(data, shouldSaveSnapshot = true) {
+  if (data?.el?.parentNode) data.el.parentNode.removeChild(data.el);
+  const index = bubbles.indexOf(data);
+  if (index > -1) bubbles.splice(index, 1);
+  for (let i = connections.length - 1; i >= 0; i--) {
+    if (connections[i].from === data || connections[i].to === data) {
+      connections.splice(i, 1);
+    }
+  }
+  if (activeBubble === data) activeBubble = null;
+  updateBubbleIds();
+  updateSidebar();
+  if (shouldSaveSnapshot) saveSnapshot();
+}
+
+function moveBubbleToIndex(bubbleData, targetIndex) {
+  const fromIndex = bubbles.indexOf(bubbleData);
+  if (fromIndex < 0) return false;
+  const boundedIndex = Math.max(0, Math.min(targetIndex, bubbles.length - 1));
+  if (fromIndex === boundedIndex) return false;
+  const [moving] = bubbles.splice(fromIndex, 1);
+  bubbles.splice(boundedIndex, 0, moving);
+  return true;
+}
+
+function closeBubbleEditorModal() {
+  if (!bubbleEditorModal) return;
+  bubbleEditorModal.classList.add('hidden');
+  bubbleEditorModal.setAttribute('aria-hidden', 'true');
+  bubbleEditorState = { bubbleData: null, action: null };
+  bubbleEditorInputArea.classList.add('hidden');
+  bubbleEditorTextInput.classList.add('hidden');
+  bubbleEditorTypeSelect.classList.add('hidden');
+  bubbleEditorOrderInput.classList.add('hidden');
+  bubbleEditorApply.classList.add('hidden');
+  bubbleEditorError.classList.add('hidden');
+  bubbleEditorError.textContent = '';
+}
+
+function showBubbleEditorError(message) {
+  bubbleEditorError.textContent = message;
+  bubbleEditorError.classList.remove('hidden');
+}
+
+function setBubbleEditorAction(action) {
+  bubbleEditorState.action = action;
+  bubbleEditorError.classList.add('hidden');
+  bubbleEditorError.textContent = '';
+
+  if (action === 'delete') {
+    removeBubble(bubbleEditorState.bubbleData, true);
+    closeBubbleEditorModal();
+    return;
+  }
+
+  bubbleEditorInputArea.classList.remove('hidden');
+  bubbleEditorApply.classList.remove('hidden');
+  bubbleEditorTextInput.classList.add('hidden');
+  bubbleEditorTypeSelect.classList.add('hidden');
+  bubbleEditorOrderInput.classList.add('hidden');
+
+  if (action === 'edit') {
+    bubbleEditorInputLabel.textContent = 'Edit bubble text';
+    bubbleEditorTextInput.value = getBubbleDisplayText(bubbleEditorState.bubbleData);
+    bubbleEditorTextInput.classList.remove('hidden');
+    bubbleEditorTextInput.focus();
+    bubbleEditorTextInput.select();
+  } else if (action === 'type') {
+    bubbleEditorInputLabel.textContent = 'Choose bubble type';
+    refreshBubbleTypeSelectOptions();
+    bubbleEditorTypeSelect.value = bubbleEditorState.bubbleData.type || 'idea';
+    bubbleEditorTypeSelect.classList.remove('hidden');
+    bubbleEditorTypeSelect.focus();
+  } else if (action === 'order') {
+    bubbleEditorInputLabel.textContent = 'Set playback order (number)';
+    bubbleEditorOrderInput.value = bubbles.indexOf(bubbleEditorState.bubbleData) + 1;
+    bubbleEditorOrderInput.classList.remove('hidden');
+    bubbleEditorOrderInput.focus();
+    bubbleEditorOrderInput.select();
+  }
+}
+
+function applyBubbleEditorAction() {
+  const { bubbleData, action } = bubbleEditorState;
+  if (!bubbleData || !action) return;
+
+  if (action === 'edit') {
+    const newText = bubbleEditorTextInput.value.trim();
+    if (!newText) {
+      showBubbleEditorError('Text cannot be empty.');
+      return;
+    }
+    bubbleData.textEl.textContent = titleCaseFirst(newText);
+    updateSidebar();
+    saveSnapshot();
+    closeBubbleEditorModal();
+    return;
+  }
+
+  if (action === 'type') {
+    const newType = bubbleEditorTypeSelect.value;
+    if (!ALLOWED_BUBBLE_TYPES.includes(newType)) {
+      showBubbleEditorError('Select a valid bubble type.');
+      return;
+    }
+    setBubbleType(bubbleData, newType);
+    updateSidebar();
+    saveSnapshot();
+    closeBubbleEditorModal();
+    return;
+  }
+
+  if (action === 'order') {
+    const rawOrder = bubbleEditorOrderInput.value.trim();
+    const parsedOrder = parseInt(rawOrder, 10);
+    if (!Number.isInteger(parsedOrder) || parsedOrder < 1) {
+      showBubbleEditorError('Playback order must be a number greater than 0.');
+      return;
+    }
+    moveBubbleToIndex(bubbleData, parsedOrder - 1);
+    bubbleData.locked = true;
+    bubbleData.el.classList.add('locked');
+    updateBubbleIds();
+    updateSidebar();
+    saveSnapshot();
+    closeBubbleEditorModal();
+  }
+}
+
+function openBubbleEditorModal(data) {
+  if (!bubbleEditorModal || !data) return;
+  bubbleEditorState = { bubbleData: data, action: null };
+  const bubbleIndex = bubbles.indexOf(data) + 1;
+  bubbleEditorMeta.textContent = `Bubble ${bubbleIndex}: ${getBubbleDisplayText(data).slice(0, 40)}`;
+  bubbleEditorModal.classList.remove('hidden');
+  bubbleEditorModal.setAttribute('aria-hidden', 'false');
+  bubbleEditorInputArea.classList.add('hidden');
+  bubbleEditorApply.classList.add('hidden');
+  bubbleEditorError.classList.add('hidden');
+  bubbleEditorError.textContent = '';
+}
+
+function attachBubbleDblClickHandler(bubble, data) {
+  bubble.addEventListener('dblclick', () => {
+    openBubbleEditorModal(data);
+  });
+}
+
+if (bubbleEditorModal) {
+  bubbleEditorModal.querySelectorAll('[data-modal-action]').forEach((btn) => {
+    btn.addEventListener('click', () => setBubbleEditorAction(btn.dataset.modalAction));
+  });
+  bubbleEditorApply.addEventListener('click', applyBubbleEditorAction);
+  bubbleEditorClose.addEventListener('click', closeBubbleEditorModal);
+  bubbleEditorModal.addEventListener('click', (e) => {
+    if (e.target === bubbleEditorModal) closeBubbleEditorModal();
+  });
+  [bubbleEditorTextInput, bubbleEditorTypeSelect, bubbleEditorOrderInput].forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') applyBubbleEditorAction();
+      if (e.key === 'Escape') closeBubbleEditorModal();
+    });
+  });
+}
+
+if (saveBubbleTypesBtn) {
+  saveBubbleTypesBtn.addEventListener('click', () => {
+    createNewMapFromSetup();
+  });
+}
+
+if (newMapBtn) {
+  newMapBtn.addEventListener('click', () => {
+    openMapSetupModal(false);
+  });
+}
+
+if (mapHistoryBtn) {
+  mapHistoryBtn.addEventListener('click', openMapHistoryModal);
+}
+
+if (exportMapIconBtn) {
+  exportMapIconBtn.addEventListener('click', () => {
+    const json = getStateSnapshot();
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${mapName.replace(/\s+/g, '_').toLowerCase() || 'mindmap'}.json`;
+    link.click();
+  });
+}
+
+if (importMapIconBtn) {
+  importMapIconBtn.addEventListener('click', () => {
+    document.getElementById('importMap').click();
+  });
+}
+
+if (toggleBubbleColumnBtn) {
+  toggleBubbleColumnBtn.addEventListener('click', () => {
+    isBubbleColumnCollapsed = !isBubbleColumnCollapsed;
+    updateBubbleColumnLayout();
+  });
+}
+
+if (closeMapSetupBtn) {
+  closeMapSetupBtn.addEventListener('click', closeMapSetupModal);
+}
+
+if (mapSetupModal) {
+  mapSetupModal.addEventListener('click', (e) => {
+    if (e.target === mapSetupModal) closeMapSetupModal();
+  });
+}
+
+if (closeMapHistoryBtn) {
+  closeMapHistoryBtn.addEventListener('click', closeMapHistoryModal);
+}
+
+if (mapHistoryModal) {
+  mapHistoryModal.addEventListener('click', (e) => {
+    if (e.target === mapHistoryModal) closeMapHistoryModal();
+  });
+}
+
+if (promptModalCreateBtn) {
+  promptModalCreateBtn.addEventListener('click', () => {
+    createFromPromptText(promptModalInput?.value || '');
+  });
+}
+
+if (promptModalCancelBtn) {
+  promptModalCancelBtn.addEventListener('click', closePromptModal);
+}
+
+if (promptModal) {
+  promptModal.addEventListener('click', (e) => {
+    if (e.target === promptModal) closePromptModal();
+  });
+}
+
+if (promptModalInput) {
+  promptModalInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createFromPromptText(promptModalInput.value);
+  });
+}
+
+setMapName('Untitled Map');
+applyBubbleTypeConfig({ labels: DEFAULT_BUBBLE_TYPE_LABELS, locked: false, usePlaceholders: true });
+loadMapDatabase();
 
 
 function findValidBubblePosition(parent, bubbleWidth = 220, bubbleHeight = 100) {
@@ -12,7 +694,7 @@ function findValidBubblePosition(parent, bubbleWidth = 220, bubbleHeight = 100) 
   const maxAttempts = 120;
   const angleIncrement = 15;
 
-  const viewBiasX = camX + window.innerWidth / 2 / zoom;
+  const viewBiasX = camX + getWorkspaceWidth() / 2 / zoom;
   const viewBiasY = camY + window.innerHeight / 2 / zoom;
 
   let bestScore = -Infinity;
@@ -78,6 +760,7 @@ recognition.continuous = true;
 recognition.interimResults = false;
 recognition.lang = 'en-US';
 
+const controlPanel = document.getElementById('controlPanel');
 const canvas = document.getElementById('connections');
 const ctx = canvas.getContext('2d');
 const bubbles = [];
@@ -89,14 +772,18 @@ let selectedBubble = null;
 let isConnectMode = false;
 
 let camX = 0, camY = 0, zoom = 1;
+const MIN_ZOOM = 0.001;
+const MAX_ZOOM = 64;
 let isPanning = false;
 let panStart = {}, camStart = {};
 
 
 
-canvas.addEventListener('mousedown', (e) => {
+window.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
-  isAutoPanning = false; // 💥 interrupt auto-pan
+  if (e.target.closest('#sidebar')) return;
+  if (e.target.closest('.bubble')) return;
+  isAutoPanning = false; // interrupt auto-pan
   isPanning = true;
   panStart = { x: e.clientX, y: e.clientY };
   camStart = { x: camX, y: camY };
@@ -109,11 +796,14 @@ window.addEventListener('mousemove', (e) => {
   const dy = (e.clientY - panStart.y) / zoom;
   camX = camStart.x - dx;
   camY = camStart.y - dy;
+  clampCameraToWorkspace();
 });
-window.addEventListener('wheel', (e) => {
+function handleWorkspaceWheelZoom(e) {
+  if (e.target.closest('#sidebar')) return;
+  e.preventDefault();
   const scale = -e.deltaY * 0.001;
   const prevZoom = zoom;
-  zoom = Math.min(Math.max(zoom * (1 + scale), 0.3), 3);
+  zoom = Math.min(Math.max(zoom * (1 + scale), MIN_ZOOM), MAX_ZOOM);
 
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
@@ -122,7 +812,10 @@ window.addEventListener('wheel', (e) => {
   const wy = (my / prevZoom) + camY;
   camX = wx - (mx / zoom);
   camY = wy - (my / zoom);
-});
+  clampCameraToWorkspace();
+}
+
+window.addEventListener('wheel', handleWorkspaceWheelZoom, { passive: false });
 
 recognition.onresult = (e) => {
   const last = e.results.length - 1;
@@ -151,11 +844,12 @@ recognition.onresult = (e) => {
     x = pos.x;
     y = pos.y;
   } else {
-const canvasWidth = window.innerWidth - 280; // again, sidebar width
+const canvasWidth = getWorkspaceWidth();
 
 x = camX + Math.random() * (canvasWidth - 100); // buffer for bubble width
 y = camY + Math.random() * (window.innerHeight - 100);
   }
+  x = Math.max(x, camX);
 
   const bubble = document.createElement('div');
   bubble.style.position = 'absolute'; // ✅ REQUIRED
@@ -180,43 +874,7 @@ data.idLabel = idLabel;
 
   
 
-  bubble.addEventListener('dblclick', () => {
-    const input = prompt("Set playback order number or type 'edit' or 'delete':");
-    if (input === 'delete') {
-      document.body.removeChild(bubble);
-      const index = bubbles.indexOf(data);
-      if (index > -1) bubbles.splice(index, 1);
-      for (let i = connections.length - 1; i >= 0; i--) {
-        if (connections[i].from === data || connections[i].to === data) {
-          connections.splice(i, 1);
-        }
-      }
-      return;
-    } else if (input === 'edit') {
-const newText = prompt("New text:", data.textEl.textContent);
-if (newText) {
-  data.textEl.textContent = newText.charAt(0).toUpperCase() + newText.slice(1);
-}
-
-      return;
-      
-    } else if (input === 'type') {
-  const newType = prompt("Enter type: idea, task, question, blocker, note", data.type);
-  const allowed = ['idea', 'task', 'question', 'blocker', 'note'];
-  if (allowed.includes(newType)) {
-    data.type = newType;
-    bubble.className = `bubble ${newType}`;
-    saveSnapshot();
-  } else {
-    alert("Invalid type");
-  }
-  return;
-}
-else {
-      data.order = parseInt(input);
-      bubble.classList.add('locked');
-    }
-  });
+  attachBubbleDblClickHandler(bubble, data);
   updateSidebar();
 
   bubble.addEventListener('click', () => {
@@ -259,9 +917,8 @@ lastSpokenIntent = null;
 
 function handleTriggers(text) {
   if (text.includes('clear')) {
-    document.querySelectorAll('.bubble').forEach(b => b.remove());
-    bubbles.length = 0;
-    connections.length = 0;
+    clearMapData();
+    saveSnapshot();
     return true;
   }
 
@@ -275,6 +932,20 @@ function handleTriggers(text) {
   if (text.startsWith('question ')) {
     lastSpokenIntent = 'question';
     return false; // allow bubble creation to proceed
+  }
+
+  const bubbleMatch = text.match(/^bubble\s+(\d+)\b/);
+  if (bubbleMatch) {
+    const bubbleNumber = parseInt(bubbleMatch[1], 10);
+    const targetIndex = bubbleNumber - 1;
+    if (targetIndex >= 0 && targetIndex < bubbles.length) {
+      const target = bubbles[targetIndex];
+      makeBubbleActive(target);
+      camX = target.x - getWorkspaceWidth() / 2 / zoom;
+      camY = target.y - window.innerHeight / 2 / zoom;
+      clampCameraToWorkspace();
+    }
+    return true;
   }
 
   return false;
@@ -300,9 +971,13 @@ let playbackPaused = false;
 let playbackIndex = 0;
 let orderedPlayback = [];
 
-function playBubblesInOrder() {
+updateBubbleColumnLayout();
+
+function startPlayback() {
+  if (!bubbles.length) return;
   playbackActive = true;
   playbackPaused = false;
+  collapsedAudioStep = 1;
 
   // Hide all first
   bubbles.forEach(b => {
@@ -311,17 +986,46 @@ function playBubblesInOrder() {
     b.el.style.opacity = 0;
   });
 
-  // Sort
-  orderedPlayback = bubbles
-    .map((b, i) => ({ ...b, _tempOrder: typeof b.order === 'number' ? b.order : i }))
-    .sort((a, b) => a._tempOrder - b._tempOrder);
+  orderedPlayback = bubbles.slice();
 
   playbackIndex = 0;
+  updateAudioControlsUI();
+  playNextBubble();
+}
+
+function stopPlayback() {
+  playbackActive = false;
+  playbackPaused = false;
+  orderedPlayback = [];
+  playbackIndex = 0;
+  window.speechSynthesis.cancel();
+  collapsedAudioStep = 0;
+  updateAudioControlsUI();
+}
+
+function pausePlayback() {
+  if (!playbackActive || playbackPaused) return;
+  playbackPaused = true;
+  window.speechSynthesis.pause();
+  collapsedAudioStep = 2;
+  updateAudioControlsUI();
+}
+
+function resumePlayback() {
+  if (!playbackActive || !playbackPaused) return;
+  playbackPaused = false;
+  window.speechSynthesis.resume();
+  collapsedAudioStep = 3;
+  updateAudioControlsUI();
   playNextBubble();
 }
 
 function playNextBubble() {
-  if (!playbackActive || playbackPaused || playbackIndex >= orderedPlayback.length) return;
+  if (!playbackActive || playbackPaused) return;
+  if (playbackIndex >= orderedPlayback.length) {
+    stopPlayback();
+    return;
+  }
 
   const b = orderedPlayback[playbackIndex++];
 
@@ -331,13 +1035,29 @@ function playNextBubble() {
   highlightBubble(b.el);
   speakText(b.textEl?.textContent || '');
 
-  panToTarget(b.x - window.innerWidth / 2 / zoom, b.y - window.innerHeight / 2 / zoom);
+  panToTarget(b.x - getWorkspaceWidth() / 2 / zoom, b.y - window.innerHeight / 2 / zoom);
 
   setTimeout(() => {
     if (!playbackPaused) {
       playNextBubble();
     }
   }, 3000);
+}
+
+function handleCollapsedAudioToggle() {
+  if (collapsedAudioStep === 0) {
+    startPlayback();
+    return;
+  }
+  if (collapsedAudioStep === 1) {
+    pausePlayback();
+    return;
+  }
+  if (collapsedAudioStep === 2) {
+    resumePlayback();
+    return;
+  }
+  stopPlayback();
 }
 
 let isAutoPanning = false;
@@ -356,6 +1076,7 @@ function panToTarget(x, y, duration = 600) {
     const t = Math.min((time - startTime) / duration, 1);
     camX = startX + dx * t;
     camY = startY + dy * t;
+    clampCameraToWorkspace();
 
     if (t < 1) {
       requestAnimationFrame(animateFrame);
@@ -393,8 +1114,10 @@ clickLayer.addEventListener('click', e => {
 
 
 function animate() {
-canvas.width = window.innerWidth - 280; // 👈 sidebar width
+canvas.width = getWorkspaceWidth();
 canvas.height = window.innerHeight;
+canvas.style.left = `${getSidebarWidth()}px`;
+canvas.style.width = `${getWorkspaceWidth()}px`;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -437,8 +1160,10 @@ connections.forEach(conn => {
 
   });
 
-clickLayer.width = window.innerWidth - 280;
+clickLayer.width = getWorkspaceWidth();
 clickLayer.height = window.innerHeight;
+clickLayer.style.left = `${getSidebarWidth()}px`;
+clickLayer.style.width = `${getWorkspaceWidth()}px`;
 
 clickCtx.clearRect(0, 0, clickLayer.width, clickLayer.height);
 clickCtx.lineWidth = 10;
@@ -470,7 +1195,7 @@ connections.forEach((conn, i) => {
 
   bubbles.forEach(b => {
     if (!b.visible) return;
-    b.el.style.left = `${(b.x - camX) * zoom}px`;
+    b.el.style.left = `${getSidebarWidth() + (b.x - camX) * zoom}px`;
     b.el.style.top = `${(b.y - camY) * zoom}px`;
     b.el.style.transform = `scale(${zoom})`;
   });
@@ -484,14 +1209,15 @@ function enableDragging(el, data) {
     if (data.locked) return;
     isDragging = true;
     data.dragging = true;
-    offsetX = e.clientX / zoom - data.x + camX;
+    offsetX = screenToWorldX(e.clientX) - data.x;
     offsetY = e.clientY / zoom - data.y + camY;
   });
 
   document.addEventListener('mousemove', e => {
     if (!isDragging) return;
-    data.x = (e.clientX / zoom - offsetX) + camX;
+    data.x = screenToWorldX(e.clientX) - offsetX;
     data.y = (e.clientY / zoom - offsetY) + camY;
+    clampBubbleToWorkspace(data);
   });
 
 document.addEventListener('mouseup', () => {
@@ -514,8 +1240,14 @@ let redoStack = [];
 
 function getStateSnapshot() {
   return JSON.stringify({
+    mapId: activeMapId,
+    mapName,
+    bubbleTypes: {
+      labels: { ...bubbleTypeLabels },
+      locked: bubbleTypesLocked
+    },
     bubbles: bubbles.map(b => ({
-      text: b.el.innerText,
+      text: getBubbleDisplayText(b),
       x: b.x,
       y: b.y,
       locked: b.locked,
@@ -531,6 +1263,9 @@ function getStateSnapshot() {
 
 function restoreStateFromSnapshot(snapshot) {
   const state = JSON.parse(snapshot);
+  activeMapId = state.mapId || activeMapId || generateMapId();
+  setMapName(state.mapName || 'Untitled Map');
+  applyBubbleTypeConfig(state.bubbleTypes || { labels: DEFAULT_BUBBLE_TYPE_LABELS, locked: false, usePlaceholders: true });
   document.querySelectorAll('.bubble').forEach(b => b.remove());
   bubbles.length = 0;
   connections.length = 0;
@@ -568,51 +1303,7 @@ data.idLabel = idLabel;
 
     if (b.order !== null) bubble.classList.add('locked');
 
-bubble.addEventListener('dblclick', () => {
-  const input = prompt("Set playback order number or type 'edit', 'delete', or 'type':");
-
-  if (input === 'delete') {
-    document.body.removeChild(bubble);
-    const index = bubbles.indexOf(data);
-    if (index > -1) bubbles.splice(index, 1);
-    for (let i = connections.length - 1; i >= 0; i--) {
-      if (connections[i].from === data || connections[i].to === data) {
-        connections.splice(i, 1);
-      }
-    }
-    saveSnapshot();
-    return;
-
-  } else if (input === 'edit') {
-const newText = prompt("New text:", data.textEl.textContent);
-if (newText) {
-  data.textEl.textContent = newText.charAt(0).toUpperCase() + newText.slice(1);
-
-
-      saveSnapshot();
-      updateSidebar();
-    }
-    return;
-
-  } else if (input === 'type') {
-    const newType = prompt("Enter type: idea, task, question, blocker, note", data.type);
-    const allowed = ['idea', 'task', 'question', 'blocker', 'note'];
-    if (allowed.includes(newType)) {
-      data.type = newType;
-      bubble.className = `bubble ${newType}`;
-      saveSnapshot();
-      updateSidebar();
-    } else {
-      alert("Invalid type");
-    }
-    return;
-
-  } else {
-    data.order = parseInt(input);
-    bubble.classList.add('locked');
-    saveSnapshot();
-  }
-});
+attachBubbleDblClickHandler(bubble, data);
 updateSidebar();
 
 
@@ -653,6 +1344,7 @@ connections.push({
     }
   });
   updateSidebar();
+  updateAudioControlsUI();
 }
 
 function saveSnapshot() {
@@ -660,10 +1352,12 @@ function saveSnapshot() {
   undoStack.push(snap);
   redoStack.length = 0;
   localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  upsertCurrentMapRecord();
 }
 function updateBubbleIds() {
   bubbles.forEach((b, i) => {
-    if (b.idLabel) b.idLabel.textContent = `#${i}`;
+    b.order = i + 1;
+    if (b.idLabel) b.idLabel.textContent = `${i + 1}`;
   });
 }
 
@@ -685,6 +1379,22 @@ function redo() {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && bubbleEditorModal && !bubbleEditorModal.classList.contains('hidden')) {
+    closeBubbleEditorModal();
+    return;
+  }
+  if (e.key === 'Escape' && mapSetupModal && !mapSetupModal.classList.contains('hidden')) {
+    closeMapSetupModal();
+    return;
+  }
+  if (e.key === 'Escape' && mapHistoryModal && !mapHistoryModal.classList.contains('hidden')) {
+    closeMapHistoryModal();
+    return;
+  }
+  if (e.key === 'Escape' && promptModal && !promptModal.classList.contains('hidden')) {
+    closePromptModal();
+    return;
+  }
   if (e.ctrlKey && e.key === 'z') {
     e.preventDefault();
     undo();
@@ -698,33 +1408,32 @@ window.addEventListener('keydown', (e) => {
 const history = localStorage.getItem('bubbleHistory');
 if (history) {
   undoStack = JSON.parse(history);
-  if (undoStack.length) restoreStateFromSnapshot(undoStack[undoStack.length - 1]);
+  if (undoStack.length) {
+    restoreStateFromSnapshot(undoStack[undoStack.length - 1]);
+  }
 }
-document.getElementById('exportMap').addEventListener('click', () => {
-  const json = getStateSnapshot();
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = "mindmap.json";
-  link.click();
-});
 
-document.getElementById('importMapBtn').addEventListener('click', () => {
-  document.getElementById('importMap').click();
-});
-
+if (!activeMapId) {
+  activeMapId = generateMapId();
+  if (!undoStack.length) {
+    saveSnapshot();
+  } else {
+    upsertCurrentMapRecord();
+  }
+}
 document.getElementById('importMap').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
+      activeMapId = generateMapId();
       const content = reader.result;
       undoStack.push(content); // push to undo
       redoStack.length = 0;
       restoreStateFromSnapshot(content);
       localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+      upsertCurrentMapRecord();
     } catch (err) {
       alert("Failed to import file. Not valid JSON?");
       console.error(err);
@@ -751,17 +1460,6 @@ function enableBubbleInteractions(bubble, data) {
   });
 }
 
-// Type change buttons
-controlPanel.querySelectorAll('[data-type]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (!activeBubble) return alert("No bubble selected.");
-    const newType = btn.getAttribute('data-type');
-    activeBubble.type = newType;
-    activeBubble.el.className = `bubble ${newType}`;
-    saveSnapshot();
-  });
-});
-
 // Lock/Unlock toggle
 controlPanel.querySelector('#lockToggle').addEventListener('click', () => {
   if (!activeBubble) return alert("No bubble selected.");
@@ -773,16 +1471,7 @@ controlPanel.querySelector('#lockToggle').addEventListener('click', () => {
 // Delete
 controlPanel.querySelector('#deleteBubble').addEventListener('click', () => {
   if (!activeBubble) return alert("No bubble selected.");
-  document.body.removeChild(activeBubble.el);
-  bubbles.splice(bubbles.indexOf(activeBubble), 1);
-  for (let i = connections.length - 1; i >= 0; i--) {
-    if (connections[i].from === activeBubble || connections[i].to === activeBubble) {
-      connections.splice(i, 1);
-    }
-  }
-  activeBubble = null;
-  saveSnapshot();
-  updateSidebar();
+  removeBubble(activeBubble, true);
 });
 
 // Quick connect (to another selected bubble)
@@ -810,7 +1499,7 @@ controlPanel.querySelector('#quickConnect').addEventListener('click', () => {
 
     const opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = `#${i}: ${b.el.innerText.slice(0, 30)}`;
+    opt.textContent = `${i + 1}: ${getBubbleDisplayText(b).slice(0, 30)}`;
     menu.appendChild(opt);
   });
 
@@ -827,14 +1516,25 @@ controlPanel.querySelector('#quickConnect').addEventListener('click', () => {
 });
 
 
-// Center view
-controlPanel.querySelector('#centerView').addEventListener('click', () => {
-  if (activeBubble) {
-    camX = activeBubble.x - window.innerWidth / 2 / zoom;
-    camY = activeBubble.y - window.innerHeight / 2 / zoom;
-  } else {
-    camX = camY = 0;
-  }
+// Snap all bubbles to viewport center while preserving formation
+controlPanel.querySelector('#snapCenter').addEventListener('click', () => {
+  if (!bubbles.length) return;
+  const minX = Math.min(...bubbles.map((b) => b.x));
+  const maxX = Math.max(...bubbles.map((b) => b.x));
+  const minY = Math.min(...bubbles.map((b) => b.y));
+  const maxY = Math.max(...bubbles.map((b) => b.y));
+  const clusterCenterX = (minX + maxX) / 2;
+  const clusterCenterY = (minY + maxY) / 2;
+  const viewportCenterX = camX + getWorkspaceWidth() / 2 / zoom;
+  const viewportCenterY = camY + window.innerHeight / 2 / zoom;
+  const offsetX = viewportCenterX - clusterCenterX;
+  const offsetY = viewportCenterY - clusterCenterY;
+  bubbles.forEach((b) => {
+    b.x += offsetX;
+    b.y += offsetY;
+  });
+  clampCameraToWorkspace();
+  saveSnapshot();
 });
 
 // Export image
@@ -882,18 +1582,9 @@ controlPanel.querySelector('#exportImageBtn').addEventListener('click', () => {
 
 // Add bubble at random position
 controlPanel.querySelector('#addBubbleBtn').addEventListener('click', () => {
-  const x = camX + Math.random() * (window.innerWidth - 300);
+  const x = camX + Math.random() * Math.max(getWorkspaceWidth() - 120, 1);
   const y = camY + Math.random() * (window.innerHeight - 200);
-  const bubble = createBubble("New idea", x, y, 'idea');
-  updateSidebar();
-  saveSnapshot();
-});
-
-// Start from center with a single bubble
-controlPanel.querySelector('#centerBubbleBtn').addEventListener('click', () => {
-  const centerX = camX + window.innerWidth / 2 / zoom;
-  const centerY = camY + window.innerHeight / 2 / zoom;
-  const bubble = createBubble("Central Idea", centerX, centerY, 'idea');
+  createBubble("New idea", x, y, 'idea');
   updateSidebar();
   saveSnapshot();
 });
@@ -904,50 +1595,14 @@ controlPanel.querySelector('#centerBubbleBtn').addEventListener('click', () => {
 // Clear map with confirmation
 controlPanel.querySelector('#clearMap').addEventListener('click', () => {
   if (confirm("Are you sure you want to clear the entire map?")) {
-    document.querySelectorAll('.bubble').forEach(b => b.remove());
-    bubbles.length = 0;
-    connections.length = 0;
-    activeBubble = null;
+    clearMapData();
     saveSnapshot();
-    updateSidebar();
   }
 });
 
 // Generate from prompt
 controlPanel.querySelector('#generateFromPrompt').addEventListener('click', () => {
-  const prompt = document.getElementById('promptInput').value.trim();
-  if (!prompt) return alert("Type something first!");
-
-  // Create center bubble
-  const centerX = camX + window.innerWidth / 2 / zoom;
-  const centerY = camY + window.innerHeight / 2 / zoom;
-
-  const centerBubble = createBubble(prompt, centerX, centerY, 'idea');
-
-  // Generate related ideas
-  const related = [
-    `Why is "${prompt}" important?`,
-    `How does "${prompt}" affect others?`,
-    `What comes after "${prompt}"?`,
-    `Obstacles to "${prompt}"`,
-    `Steps to achieve "${prompt}"`
-  ];
-
-  shuffleArray(related);
-  const count = Math.floor(Math.random() * 3) + 3; // 3–5
-
-  for (let i = 0; i < count; i++) {
-    const angle = (Math.PI * 2 / count) * i;
-    const radius = 220;
-    const x = centerX + Math.cos(angle) * radius;
-    const y = centerY + Math.sin(angle) * radius;
-
-    const childBubble = createBubble(related[i], x, y, 'question');
-    connections.push({ from: centerBubble, to: childBubble, label: '' });
-  }
-
-  updateSidebar();
-  saveSnapshot();
+  openPromptModal();
 });
 
 
@@ -958,15 +1613,17 @@ function updateSidebar() {
 
   bubbles.forEach((b, i) => {
     const li = document.createElement('li');
-    li.textContent = `#${i}: ${b.el.innerText.slice(0, 30)}`;
+    li.classList.add(`type-${b.type || 'idea'}`);
+    li.textContent = `${i + 1}: ${getBubbleDisplayText(b).slice(0, 30)}`;
     if (b === activeBubble) li.classList.add('active');
 
     li.draggable = true;
 
     li.addEventListener('click', () => {
       makeBubbleActive(b);
-      camX = b.x - window.innerWidth / 2 / zoom;
+      camX = b.x - getWorkspaceWidth() / 2 / zoom;
       camY = b.y - window.innerHeight / 2 / zoom;
+      clampCameraToWorkspace();
     });
 
     li.addEventListener('dragstart', (e) => {
@@ -986,8 +1643,9 @@ function updateSidebar() {
       e.preventDefault();
       const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
       const toIndex = i;
-      const moving = bubbles.splice(fromIndex, 1)[0];
-      bubbles.splice(toIndex, 0, moving);
+      if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= bubbles.length) return;
+      const moving = bubbles[fromIndex];
+      moveBubbleToIndex(moving, toIndex);
       updateBubbleIds();
       updateSidebar();
       saveSnapshot();
@@ -997,35 +1655,33 @@ function updateSidebar() {
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const playBtn = document.getElementById('playBtn');
-  if (playBtn) {
-    playBtn.addEventListener('click', playBubblesInOrder);
-  } else {
-    console.warn("playBtn not found in DOM");
-  }
-});
+if (audioPlayStopToggle) {
+  audioPlayStopToggle.addEventListener('click', () => {
+    if (playbackActive) {
+      stopPlayback();
+      return;
+    }
+    startPlayback();
+  });
+}
 
-document.getElementById('playStart').addEventListener('click', playBubblesInOrder);
+if (audioPauseResumeToggle) {
+  audioPauseResumeToggle.addEventListener('click', () => {
+    if (!playbackActive) return;
+    if (playbackPaused) {
+      resumePlayback();
+      return;
+    }
+    pausePlayback();
+  });
+}
 
-document.getElementById('playPause').addEventListener('click', () => {
-  playbackPaused = true;
-});
-
-document.getElementById('playResume').addEventListener('click', () => {
-  if (!playbackActive || !playbackPaused) return;
-  playbackPaused = false;
-  playNextBubble();
-});
-
-document.getElementById('playStop').addEventListener('click', () => {
-  playbackActive = false;
-  playbackPaused = false;
-  orderedPlayback = [];
-  playbackIndex = 0;
-});
+if (audioSingleToggle) {
+  audioSingleToggle.addEventListener('click', handleCollapsedAudioToggle);
+}
 
 function createBubble(text, x, y, type = 'idea') {
+  x = Math.max(x, camX);
   const bubble = document.createElement('div');
   bubble.className = `bubble ${type}`;
   bubble.style.position = 'absolute';
@@ -1052,43 +1708,7 @@ function createBubble(text, x, y, type = 'idea') {
   bubble.appendChild(idLabel);
   data.idLabel = idLabel;
 
-    bubble.addEventListener('dblclick', () => {
-    const input = prompt("Set playback order number or type 'edit' or 'delete':");
-    if (input === 'delete') {
-      document.body.removeChild(bubble);
-      const index = bubbles.indexOf(data);
-      if (index > -1) bubbles.splice(index, 1);
-      for (let i = connections.length - 1; i >= 0; i--) {
-        if (connections[i].from === data || connections[i].to === data) {
-          connections.splice(i, 1);
-        }
-      }
-      updateSidebar();
-      return;
-    } else if (input === 'edit') {
-      const newText = prompt("New text:", data.textEl.textContent);
-      if (newText) {
-        data.textEl.textContent = newText.charAt(0).toUpperCase() + newText.slice(1);
-      }
-      updateSidebar();
-      return;
-    } else if (input === 'type') {
-      const newType = prompt("Enter type: idea, task, question, blocker, note", data.type);
-      const allowed = ['idea', 'task', 'question', 'blocker', 'note'];
-      if (allowed.includes(newType)) {
-        data.type = newType;
-        bubble.className = `bubble ${newType}`;
-        saveSnapshot();
-      } else {
-        alert("Invalid type");
-      }
-      return;
-    } else {
-      data.order = parseInt(input);
-      bubble.classList.add('locked');
-    }
-    updateSidebar();
-  });
+  attachBubbleDblClickHandler(bubble, data);
 
 
   enableDragging(bubble, data);
@@ -1096,6 +1716,7 @@ function createBubble(text, x, y, type = 'idea') {
 
   document.body.appendChild(bubble);
   bubbles.push(data);
+  updateBubbleIds();
   return data;
 }
 
@@ -1105,7 +1726,3 @@ function shuffleArray(arr) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
-
-
-
-

@@ -7,52 +7,132 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
+  <div id="floatingMapName">Untitled Map</div>
+
   <div id="sidebar">
-    <img class="logo" src="./assets/images/SpeechFlow.png" alt="SpeechFlow Logo">
-    <h2>Bubbles</h2>
-    <ul id="bubbleList"></ul>
+    <img id="logoFull" class="logo logo-full" src="./assets/images/SpeechFlow.png" alt="SpeechFlow Logo">
+    <img id="logoCompact" class="logo logo-compact hidden" src="./assets/images/spflowlogosmall.png" onerror="this.onerror=null;this.src='./assets/images/SpeechFlow.png';" alt="SpeechFlow Compact Logo">
+    <div id="sidebarHeader">
+      <button id="newMapBtn" type="button" title="Create New Map"><span class="btn-icon">+</span></button>
+      <button id="mapHistoryBtn" type="button" title="Map History"><span class="btn-icon">🕘</span></button>
+      <button id="exportMapIconBtn" type="button" title="Export Map"><span class="btn-icon">⬇</span></button>
+      <button id="importMapIconBtn" type="button" title="Import Map"><span class="btn-icon">⬆</span></button>
+      <button id="toggleBubbleColumn" type="button" title="Toggle Bubble List"><span class="btn-icon">◂</span></button>
+    </div>
 
-    <div class="status">🎙️ Listening...</div>
-    <button id="playBtn">▶ Play</button>
-    <div id="playControls">
-  <button id="playStart">▶️ Play</button>
-  <button id="playPause">⏸ Pause</button>
-  <button id="playResume">▶️ Resume</button>
-  <button id="playStop">⏹ Stop</button>
-</div>
+    <div id="sidebarColumns" class="expanded">
+      <div id="controlPanel">
+        <button id="lockToggle"><span class="btn-icon">🔒</span><span class="btn-label">Lock/Unlock</span></button>
+        <button id="deleteBubble"><span class="btn-icon">🗑️</span><span class="btn-label">Delete</span></button>
+        <button id="quickConnect"><span class="btn-icon">🔗</span><span class="btn-label">Connect</span></button>
+        <button id="snapCenter"><span class="btn-icon">🎯</span><span class="btn-label">Snap to Center</span></button>
+        <button id="exportImageBtn"><span class="btn-icon">📸</span><span class="btn-label">Export Image</span></button>
+        <button id="addBubbleBtn"><span class="btn-icon">➕</span><span class="btn-label">Add Bubble</span></button>
+        <button id="clearMap"><span class="btn-icon">🧹</span><span class="btn-label">Clear Map</span></button>
+        <input type="file" id="importMap" style="display:none" accept=".json">
+        <button id="generateFromPrompt"><span class="btn-icon">🧠</span><span class="btn-label">Create from Prompt</span></button>
+      </div>
 
-    <div id="io-controls">
-      <button id="exportMap">⬇ Export Map</button>
-      <input type="file" id="importMap" style="display:none" accept=".json">
-      <button id="importMapBtn">⬆ Import Map</button>
+      <div id="bubbleColumn">
+        <h3>Bubbles</h3>
+        <ul id="bubbleList"></ul>
+      </div>
+    </div>
+
+    <div id="audioControlsBar">
+      <div class="status"><span class="status-icon">🎙️</span><span class="status-label">Listening...</span></div>
+      <div id="audioExpandedControls">
+        <button id="audioPlayStopToggle" type="button"><span class="btn-icon">▶️</span><span class="btn-label">Play</span></button>
+        <button id="audioPauseResumeToggle" type="button" disabled><span class="btn-icon">⏸</span><span class="btn-label">Pause</span></button>
+      </div>
+      <button id="audioSingleToggle" type="button" class="hidden"><span class="btn-icon">▶️</span><span class="btn-label">Play / Pause / Resume / Stop</span></button>
     </div>
   </div>
 
   <canvas id="connections"></canvas>
   <canvas id="clickLayer" style="position:absolute;top:0;left:0;z-index:2"></canvas>
 
-  <div id="controlPanel" style="position:fixed;top:20px;right:20px;z-index:9999;background:#111;padding:10px;border-radius:8px;color:white;font-family:sans-serif">
-    <button data-type="idea">💡 Idea</button>
-    <button data-type="task">✅ Task</button>
-    <button data-type="question">❓ Question</button>
-    <button data-type="blocker">⛔ Blocker</button>
-    <button data-type="note">📝 Note</button>
-    <button id="lockToggle">🔒 Lock/Unlock</button>
-    <button id="deleteBubble">🗑️ Delete</button>
-    <button id="quickConnect">🔗 Connect</button>
+  <div id="bubbleEditorModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="bubbleEditorTitle">
+      <h3 id="bubbleEditorTitle">Bubble Actions</h3>
+      <p id="bubbleEditorMeta"></p>
 
-    <button id="centerView">🎯 Center View</button>
-    <button id="exportImageBtn">📸 Export Image</button>
-    <button id="addBubbleBtn">➕ Add Bubble</button>
-<button id="centerBubbleBtn">🎯 Start from Center</button>
+      <div class="modal-actions">
+        <button type="button" data-modal-action="edit">Edit Text</button>
+        <button type="button" data-modal-action="type">Change Type</button>
+        <button type="button" data-modal-action="order">Set Playback Order</button>
+        <button type="button" data-modal-action="delete">Delete Bubble</button>
+      </div>
 
-    
-    <button id="clearMap">🧹 Clear Map</button>
-    <hr>
-       
-<input type="text" id="promptInput" placeholder="Type an idea..." style="width: 50%; margin: 10px 0; padding: 6px;">
-<button id="generateFromPrompt">🧠 Create from Prompt</button>
+      <div id="bubbleEditorInputArea" class="hidden">
+        <label id="bubbleEditorInputLabel" for="bubbleEditorTextInput"></label>
+        <input id="bubbleEditorTextInput" type="text" class="hidden">
+        <select id="bubbleEditorTypeSelect" class="hidden">
+          <option value="idea">Idea</option>
+          <option value="task">Task</option>
+          <option value="question">Question</option>
+          <option value="blocker">Blocker</option>
+          <option value="note">Note</option>
+        </select>
+        <input id="bubbleEditorOrderInput" type="number" min="1" step="1" class="hidden">
+      </div>
 
+      <p id="bubbleEditorError" class="modal-error hidden"></p>
+
+      <div class="modal-footer">
+        <button id="bubbleEditorApply" type="button" class="hidden">Apply</button>
+        <button id="bubbleEditorClose" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mapSetupModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mapSetupTitle">
+      <h3 id="mapSetupTitle">Create New Map</h3>
+      <p class="modal-subtitle">Name your map and set bubble type labels.</p>
+
+      <label for="mapNameInput">Map Name</label>
+      <input id="mapNameInput" type="text" placeholder="Map Name">
+
+      <div id="mapTypeInputs">
+        <input id="bubbleTypeIdea" class="bubble-type-input type-idea" type="text" placeholder="Bubble Type">
+        <input id="bubbleTypeTask" class="bubble-type-input type-task" type="text" placeholder="Bubble Type">
+        <input id="bubbleTypeQuestion" class="bubble-type-input type-question" type="text" placeholder="Bubble Type">
+        <input id="bubbleTypeBlocker" class="bubble-type-input type-blocker" type="text" placeholder="Bubble Type">
+        <input id="bubbleTypeNote" class="bubble-type-input type-note" type="text" placeholder="Bubble Type">
+      </div>
+
+      <p id="mapSetupError" class="modal-error hidden"></p>
+
+      <div class="modal-footer">
+        <button id="saveBubbleTypes" type="button">Save Bubble Types</button>
+        <button id="closeMapSetup" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mapHistoryModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mapHistoryTitle">
+      <h3 id="mapHistoryTitle">Map History</h3>
+      <p class="modal-subtitle">Load a previous map from local storage.</p>
+      <div id="mapHistoryList"></div>
+      <div class="modal-footer">
+        <button id="closeMapHistory" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="promptModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="promptModalTitle">
+      <h3 id="promptModalTitle">Create From Prompt</h3>
+      <p class="modal-subtitle">Enter a topic to generate a mini map.</p>
+      <input id="promptModalInput" type="text" placeholder="Type an idea...">
+      <p id="promptModalError" class="modal-error hidden"></p>
+      <div class="modal-footer">
+        <button id="promptModalCreate" type="button">Create</button>
+        <button id="promptModalCancel" type="button">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script src="./script.js"></script>
