@@ -1,5 +1,16 @@
 let activeBubble = null;
 const sidebarEl = document.getElementById('sidebar');
+const speechFlowCore = window.SpeechFlowCore || {};
+const stateModule = speechFlowCore.state;
+const cameraModule = speechFlowCore.camera;
+const nodeModule = speechFlowCore.node;
+const edgeModule = speechFlowCore.edge;
+const playbackModule = speechFlowCore.playback;
+const uiModule = speechFlowCore.ui;
+const persistenceModule = speechFlowCore.persistence;
+const speechModule = speechFlowCore.speech;
+const graphModule = speechFlowCore.graph;
+const layoutModule = speechFlowCore.layout;
 
 function getSidebarWidth() {
   if (!sidebarEl) return 280;
@@ -33,6 +44,9 @@ function clampCameraToWorkspace() {
   if (camX > leftmostBubbleX) {
     camX = leftmostBubbleX;
   }
+  if (stateModule?.setZoomState) {
+    stateModule.setZoomState({ x: camX, y: camY, zoom });
+  }
 }
 
 function highlightBubble(bubbleEl) {
@@ -42,6 +56,118 @@ function highlightBubble(bubbleEl) {
 
 function getBubbleDisplayText(bubbleData) {
   return (bubbleData.textEl?.textContent || '').trim();
+}
+
+function defaultNodeData(raw, text, x, y, type) {
+  if (nodeModule?.createNode) {
+    return nodeModule.createNode({
+      ...(raw || {}),
+      text,
+      x,
+      y,
+      type
+    });
+  }
+
+  const now = new Date().toISOString();
+  return {
+    id: raw?.id || `node_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    text: text || 'New idea',
+    x,
+    y,
+    notes: raw?.notes || '',
+    tags: Array.isArray(raw?.tags) ? raw.tags : [],
+    priority: Number.isFinite(raw?.priority) ? raw.priority : 0,
+    colorOverride: raw?.colorOverride || null,
+    dueDate: raw?.dueDate || null,
+    metadata: raw?.metadata && typeof raw.metadata === 'object' ? raw.metadata : {},
+    aiSummary: raw?.aiSummary || '',
+    voiceNote: raw?.voiceNote || '',
+    createdAt: raw?.createdAt || now,
+    updatedAt: raw?.updatedAt || now
+  };
+}
+
+function syncCoreGraphState() {
+  if (!stateModule?.setGraph) return;
+  const nodes = bubbles.map((bubble) => ({
+    id: bubble.id,
+    type: bubble.type,
+    priority: bubble.priority || 0,
+    tags: Array.isArray(bubble.tags) ? bubble.tags : [],
+    x: bubble.x,
+    y: bubble.y
+  }));
+  const edges = connections.map((conn) => ({
+    id: conn.id,
+    from: conn.from?.id,
+    to: conn.to?.id,
+    type: conn.type,
+    weight: conn.weight
+  }));
+  stateModule.setGraph(nodes, edges);
+}
+
+function buildEdge(fromNode, toNode, extra) {
+  const payload = {
+    from: fromNode,
+    to: toNode,
+    label: extra?.label || '',
+    weight: Number.isFinite(extra?.weight) ? extra.weight : 1,
+    type: extra?.type || 'sequence',
+    metadata: extra?.metadata && typeof extra.metadata === 'object' ? extra.metadata : {},
+    id: extra?.id
+  };
+
+  if (edgeModule?.createEdge) {
+    return edgeModule.createEdge(payload);
+  }
+
+  return {
+    id: payload.id || `edge_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    from: payload.from,
+    to: payload.to,
+    label: payload.label,
+    weight: payload.weight,
+    type: payload.type,
+    metadata: payload.metadata
+  };
+}
+
+function addConnection(fromNode, toNode, extra) {
+  if (!fromNode || !toNode) return null;
+  const fromId = fromNode.id;
+  const toId = toNode.id;
+  if (edgeModule?.edgeExists && edgeModule.edgeExists(connections, fromId, toId, extra?.type || 'sequence')) {
+    return null;
+  }
+  const edge = buildEdge(fromNode, toNode, extra || {});
+  connections.push(edge);
+  syncCoreGraphState();
+  return edge;
+}
+
+function resolveBubbleCollision(data) {
+  if (!layoutModule?.resolveCollision) return;
+  const next = layoutModule.resolveCollision(
+    bubbles.map((bubble) => ({
+      id: bubble.id,
+      x: bubble.x,
+      y: bubble.y
+    })),
+    { id: data.id, x: data.x, y: data.y },
+    170
+  );
+  if (!next) return;
+  data.x = next.x;
+  data.y = next.y;
+}
+
+function applyBubbleVisualState(data) {
+  if (!data || !data.el) return;
+  if (uiModule?.applyNodeVisualState) {
+    uiModule.applyNodeVisualState(data, data.el);
+  }
 }
 
 const ALLOWED_BUBBLE_TYPES = ['idea', 'task', 'question', 'blocker', 'note'];
@@ -204,6 +330,7 @@ function clearMapData() {
   orderedPlayback = [];
   playbackIndex = 0;
   window.speechSynthesis.cancel();
+  syncCoreGraphState();
   updateAudioControlsUI();
   updateSidebar();
 }
@@ -394,7 +521,7 @@ function createFromPromptText(prompt) {
     const x = centerX + Math.cos(angle) * radius;
     const y = centerY + Math.sin(angle) * radius;
     const childBubble = createBubble(related[i], x, y, 'question');
-    connections.push({ from: centerBubble, to: childBubble, label: '' });
+    addConnection(centerBubble, childBubble, { label: '', type: 'dependency' });
   }
 
   updateSidebar();
@@ -431,7 +558,7 @@ function setBubbleType(data, newType) {
   if (!ALLOWED_BUBBLE_TYPES.includes(newType)) return;
   data.type = newType;
   data.el.className = `bubble ${newType}`;
-  data.el.classList.toggle('locked', !!data.locked);
+  applyBubbleVisualState(data);
   if (activeBubble === data) data.el.classList.add('active');
 }
 
@@ -444,6 +571,7 @@ function removeBubble(data, shouldSaveSnapshot = true) {
       connections.splice(i, 1);
     }
   }
+  syncCoreGraphState();
   if (activeBubble === data) activeBubble = null;
   updateBubbleIds();
   updateSidebar();
@@ -686,6 +814,7 @@ if (promptModalInput) {
 setMapName('Untitled Map');
 applyBubbleTypeConfig({ labels: DEFAULT_BUBBLE_TYPE_LABELS, locked: false, usePlaceholders: true });
 loadMapDatabase();
+if (stateModule?.setPlaybackMode) stateModule.setPlaybackMode('linear');
 
 
 function findValidBubblePosition(parent, bubbleWidth = 220, bubbleHeight = 100) {
@@ -803,7 +932,11 @@ function handleWorkspaceWheelZoom(e) {
   e.preventDefault();
   const scale = -e.deltaY * 0.001;
   const prevZoom = zoom;
-  zoom = Math.min(Math.max(zoom * (1 + scale), MIN_ZOOM), MAX_ZOOM);
+  if (cameraModule?.clampZoom) {
+    zoom = cameraModule.clampZoom(zoom * (1 + scale), MIN_ZOOM, MAX_ZOOM);
+  } else {
+    zoom = Math.min(Math.max(zoom * (1 + scale), MIN_ZOOM), MAX_ZOOM);
+  }
 
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
@@ -854,11 +987,38 @@ y = camY + Math.random() * (window.innerHeight - 100);
   const bubble = document.createElement('div');
   bubble.style.position = 'absolute'; // ✅ REQUIRED
 
-  const data = { el: bubble, x, y, dragging: false, locked: false, visible: true, order: null, type: lastSpokenIntent ||'idea' };
+  const normalizedNode = defaultNodeData(
+    null,
+    transcript,
+    x,
+    y,
+    lastSpokenIntent || 'idea'
+  );
+  const data = {
+    el: bubble,
+    id: normalizedNode.id,
+    x: normalizedNode.x,
+    y: normalizedNode.y,
+    dragging: false,
+    locked: false,
+    visible: true,
+    order: null,
+    type: lastSpokenIntent || 'idea',
+    notes: normalizedNode.notes,
+    tags: normalizedNode.tags,
+    priority: normalizedNode.priority,
+    colorOverride: normalizedNode.colorOverride,
+    dueDate: normalizedNode.dueDate,
+    metadata: normalizedNode.metadata,
+    aiSummary: normalizedNode.aiSummary,
+    voiceNote: normalizedNode.voiceNote,
+    createdAt: normalizedNode.createdAt,
+    updatedAt: normalizedNode.updatedAt
+  };
   bubble.className = `bubble ${data.type}`;
   const textSpan = document.createElement('span');
 textSpan.className = 'bubble-text';
-textSpan.textContent = transcript;
+textSpan.textContent = normalizedNode.text;
 bubble.appendChild(textSpan);
 data.textEl = textSpan;
 
@@ -867,6 +1027,7 @@ data.textEl = textSpan;
 idLabel.className = 'bubble-id-label';
 bubble.appendChild(idLabel);
 data.idLabel = idLabel;
+  applyBubbleVisualState(data);
 
   bubble.style.opacity = 0;
   updateSidebar();
@@ -883,7 +1044,7 @@ data.idLabel = idLabel;
         selectedBubble = data;
         bubble.style.outline = '2px solid yellow';
       } else {
-        connections.push({ from: selectedBubble, to: data, label: '' });
+        addConnection(selectedBubble, data, { label: '' });
 
         selectedBubble.el.style.outline = '';
         selectedBubble = null;
@@ -895,6 +1056,7 @@ data.idLabel = idLabel;
   enableBubbleInteractions(bubble, data);
 
 bubbles.push(data);
+syncCoreGraphState();
 lastSpokenIntent = null;
 
 
@@ -906,7 +1068,7 @@ lastSpokenIntent = null;
 
   if (pendingConnectionFrom) {
     setTimeout(() => {
-      connections.push({ from: pendingConnectionFrom, to: data });
+      addConnection(pendingConnectionFrom, data, { label: '', type: 'dependency' });
       pendingConnectionFrom = null;
       bubble.style.opacity = 1;
     }, 300);
@@ -953,6 +1115,11 @@ function handleTriggers(text) {
 
 
 function speakText(text) {
+  if (speechModule?.speak) {
+    speechModule.speak(text, { rate: 1, pitch: 1, lang: 'en-US' });
+    return;
+  }
+
   if (!window.speechSynthesis) {
     console.warn("Speech Synthesis not supported");
     return;
@@ -986,7 +1153,15 @@ function startPlayback() {
     b.el.style.opacity = 0;
   });
 
-  orderedPlayback = bubbles.slice();
+  const coreState = stateModule?.getState ? stateModule.getState() : { playbackMode: 'linear', activeFilters: {} };
+  orderedPlayback = playbackModule?.generatePlayback
+    ? playbackModule.generatePlayback(coreState.playbackMode || 'linear', {
+      nodes: bubbles,
+      edges: connections,
+      minPriority: coreState.activeFilters?.minPriority,
+      tag: coreState.activeFilters?.tags?.[0] || null
+    })
+    : bubbles.slice();
 
   playbackIndex = 0;
   updateAudioControlsUI();
@@ -1218,12 +1393,15 @@ function enableDragging(el, data) {
     data.x = screenToWorldX(e.clientX) - offsetX;
     data.y = (e.clientY / zoom - offsetY) + camY;
     clampBubbleToWorkspace(data);
+    data.updatedAt = new Date().toISOString();
   });
 
 document.addEventListener('mouseup', () => {
   if (isDragging) {
     isDragging = false;
     data.dragging = false;
+    resolveBubbleCollision(data);
+    data.updatedAt = new Date().toISOString();
     saveSnapshot();
   }
 });
@@ -1239,7 +1417,8 @@ let undoStack = [];
 let redoStack = [];
 
 function getStateSnapshot() {
-  return JSON.stringify({
+  const snapshot = {
+    schemaVersion: persistenceModule?.SCHEMA_VERSION || 2,
     mapId: activeMapId,
     mapName,
     bubbleTypes: {
@@ -1252,17 +1431,38 @@ function getStateSnapshot() {
       y: b.y,
       locked: b.locked,
       order: b.order,
-      type: b.type
+      type: b.type,
+      id: b.id,
+      notes: b.notes || '',
+      tags: Array.isArray(b.tags) ? b.tags : [],
+      priority: Number.isFinite(b.priority) ? b.priority : 0,
+      colorOverride: b.colorOverride || null,
+      dueDate: b.dueDate || null,
+      metadata: b.metadata && typeof b.metadata === 'object' ? b.metadata : {},
+      aiSummary: b.aiSummary || '',
+      voiceNote: b.voiceNote || '',
+      createdAt: b.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     })),
     connections: connections.map(conn => ({
+      id: conn.id,
       from: bubbles.indexOf(conn.from),
-      to: bubbles.indexOf(conn.to)
+      to: bubbles.indexOf(conn.to),
+      label: conn.label || '',
+      weight: Number.isFinite(conn.weight) ? conn.weight : 1,
+      type: conn.type || 'sequence',
+      metadata: conn.metadata && typeof conn.metadata === 'object' ? conn.metadata : {}
     }))
-  });
+  };
+  return persistenceModule?.stringifySnapshot
+    ? persistenceModule.stringifySnapshot(snapshot)
+    : JSON.stringify(snapshot);
 }
 
 function restoreStateFromSnapshot(snapshot) {
-  const state = JSON.parse(snapshot);
+  const state = persistenceModule?.parseSnapshot
+    ? persistenceModule.parseSnapshot(snapshot)
+    : JSON.parse(snapshot);
   activeMapId = state.mapId || activeMapId || generateMapId();
   setMapName(state.mapName || 'Untitled Map');
   applyBubbleTypeConfig(state.bubbleTypes || { labels: DEFAULT_BUBBLE_TYPE_LABELS, locked: false, usePlaceholders: true });
@@ -1272,20 +1472,38 @@ function restoreStateFromSnapshot(snapshot) {
 
   state.bubbles.forEach(b => {
     const bubble = document.createElement('div');
-        const data = {
+    const normalizedNode = defaultNodeData(
+      b,
+      b.text,
+      b.x,
+      b.y,
+      b.type || 'idea'
+    );
+    const data = {
       el: bubble,
-      x: b.x,
-      y: b.y,
+      id: normalizedNode.id,
+      x: normalizedNode.x,
+      y: normalizedNode.y,
       locked: b.locked,
       order: b.order,
       dragging: false,
       visible: true,
-      type: b.type || 'idea'
+      type: normalizedNode.type || 'idea',
+      notes: normalizedNode.notes,
+      tags: normalizedNode.tags,
+      priority: normalizedNode.priority,
+      colorOverride: normalizedNode.colorOverride,
+      dueDate: normalizedNode.dueDate,
+      metadata: normalizedNode.metadata,
+      aiSummary: normalizedNode.aiSummary,
+      voiceNote: normalizedNode.voiceNote,
+      createdAt: normalizedNode.createdAt,
+      updatedAt: normalizedNode.updatedAt
     };
     bubble.className = `bubble ${data.type}`;
 const textSpan = document.createElement('span');
 textSpan.className = 'bubble-text';
-textSpan.textContent = b.text;
+textSpan.textContent = normalizedNode.text;
 bubble.appendChild(textSpan);
 data.textEl = textSpan;
 
@@ -1297,6 +1515,7 @@ data.textEl = textSpan;
 idLabel.className = 'bubble-id-label';
 bubble.appendChild(idLabel);
 data.idLabel = idLabel;
+    applyBubbleVisualState(data);
 
 
 
@@ -1313,7 +1532,7 @@ updateSidebar();
           selectedBubble = data;
           bubble.style.outline = '2px solid yellow';
         } else {
-          connections.push({ from: selectedBubble, to: data, label: '' });
+          addConnection(selectedBubble, data, { label: '' });
 
           selectedBubble.el.style.outline = '';
           selectedBubble = null;
@@ -1326,6 +1545,7 @@ updateSidebar();
     enableBubbleInteractions(bubble, data);
 
 bubbles.push(data);
+    syncCoreGraphState();
 
 
     updateSidebar();
@@ -1336,13 +1556,16 @@ bubbles.push(data);
 
   state.connections.forEach(conn => {
     if (bubbles[conn.from] && bubbles[conn.to]) {
-connections.push({
-  from: bubbles[conn.from],
-  to: bubbles[conn.to],
-  label: conn.label || ''
-});
+      addConnection(bubbles[conn.from], bubbles[conn.to], {
+        id: conn.id,
+        label: conn.label || '',
+        weight: conn.weight,
+        type: conn.type,
+        metadata: conn.metadata
+      });
     }
   });
+  syncCoreGraphState();
   updateSidebar();
   updateAudioControlsUI();
 }
@@ -1352,6 +1575,8 @@ function saveSnapshot() {
   undoStack.push(snap);
   redoStack.length = 0;
   localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  if (stateModule?.setDirty) stateModule.setDirty(true);
+  syncCoreGraphState();
   upsertCurrentMapRecord();
 }
 function updateBubbleIds() {
@@ -1449,6 +1674,7 @@ function makeBubbleActive(data) {
   if (activeBubble) activeBubble.el.classList.remove('active');
   activeBubble = data;
   data.el.classList.add('active');
+  if (stateModule?.setSelectedNode) stateModule.setSelectedNode(data.id);
   updateSidebar();
 }
 
@@ -1506,7 +1732,7 @@ controlPanel.querySelector('#quickConnect').addEventListener('click', () => {
   menu.addEventListener('change', () => {
     const target = bubbles[parseInt(menu.value)];
     if (target) {
-      connections.push({ from: activeBubble, to: target, label: '' });
+      addConnection(activeBubble, target, { label: '' });
       saveSnapshot();
       document.body.removeChild(menu);
     }
@@ -1533,6 +1759,19 @@ controlPanel.querySelector('#snapCenter').addEventListener('click', () => {
     b.x += offsetX;
     b.y += offsetY;
   });
+  if (activeBubble && graphModule?.getConnectedComponent && layoutModule?.getClusterBounds && cameraModule?.zoomToFitCluster) {
+    const clusterNodeIds = graphModule.getConnectedComponent(activeBubble.id, bubbles, connections);
+    const clusterBounds = layoutModule.getClusterBounds(bubbles, clusterNodeIds);
+    const nextView = cameraModule.zoomToFitCluster(clusterBounds, {
+      width: getWorkspaceWidth(),
+      height: window.innerHeight
+    }, 120);
+    if (nextView) {
+      camX = nextView.x;
+      camY = nextView.y;
+      zoom = cameraModule.clampZoom ? cameraModule.clampZoom(nextView.zoom, MIN_ZOOM, MAX_ZOOM) : nextView.zoom;
+    }
+  }
   clampCameraToWorkspace();
   saveSnapshot();
 });
@@ -1685,28 +1924,41 @@ function createBubble(text, x, y, type = 'idea') {
   const bubble = document.createElement('div');
   bubble.className = `bubble ${type}`;
   bubble.style.position = 'absolute';
+  const normalizedNode = defaultNodeData(null, text, x, y, type);
 
   const textSpan = document.createElement('span');
   textSpan.className = 'bubble-text';
-  textSpan.textContent = text;
+  textSpan.textContent = normalizedNode.text;
   bubble.appendChild(textSpan);
 
   const data = {
     el: bubble,
-    x,
-    y,
+    id: normalizedNode.id,
+    x: normalizedNode.x,
+    y: normalizedNode.y,
     dragging: false,
     locked: false,
     visible: true,
     order: null,
     type,
-    textEl: textSpan
+    textEl: textSpan,
+    notes: normalizedNode.notes,
+    tags: normalizedNode.tags,
+    priority: normalizedNode.priority,
+    colorOverride: normalizedNode.colorOverride,
+    dueDate: normalizedNode.dueDate,
+    metadata: normalizedNode.metadata,
+    aiSummary: normalizedNode.aiSummary,
+    voiceNote: normalizedNode.voiceNote,
+    createdAt: normalizedNode.createdAt,
+    updatedAt: normalizedNode.updatedAt
   };
 
   const idLabel = document.createElement('div');
   idLabel.className = 'bubble-id-label';
   bubble.appendChild(idLabel);
   data.idLabel = idLabel;
+  applyBubbleVisualState(data);
 
   attachBubbleDblClickHandler(bubble, data);
 
@@ -1716,6 +1968,7 @@ function createBubble(text, x, y, type = 'idea') {
 
   document.body.appendChild(bubble);
   bubbles.push(data);
+  syncCoreGraphState();
   updateBubbleIds();
   return data;
 }

@@ -1,64 +1,23 @@
 # SpeechFlow
 
-SpeechFlow is a browser-based mind-mapping workspace with draggable bubbles, voice capture, zoom/pan canvas controls, map history, and playback tools.
+SpeechFlow is a browser-based visual thinking workspace with voice capture, draggable bubbles, directed connections, and playback.
 
-## Current UI Snapshot
+## Version
+`v0.1`
 
-![SpeechFlow Sidebar](./assets/images/sidebar-screenshot.png)
+## What's New
+- Introduced modular architecture under `core/` for state, camera, node, edge, graph, playback, persistence, UI, speech, and layout concerns.
+- Upgraded data schema to `schemaVersion: 2` with richer node and directed-edge models.
+- Added migration handling for legacy snapshots so older saved maps remain loadable.
+- Switched playback sequencing to a mode-based generator foundation.
+- Added collision resolution on drag-end and cluster-aware zoom-to-fit support in snap-center flows.
 
-## Features
-
-- Voice-to-bubble capture using Web Speech API (`en-US`)
-- Bubble graph editing:
-  - Drag bubbles, connect bubbles, relabel connections
-  - Reorder playback by dragging bubble rows in the sidebar
-  - Bubble action modal (edit text, change type, set order, delete)
-- Collapsible sidebar with:
-  - Compact icon-only mode
-  - Separate audio control zone at the bottom
-  - Top action strip (`new map`, `history`, `export`, `import`, `collapse`)
-- Map management:
-  - New map modal with map naming and bubble type setup
-  - Local map history database (stored in `localStorage`)
-  - JSON import/export
-- Canvas interaction:
-  - Left-drag panning on workspace background
-  - Mouse-wheel zoom with wide zoom range
-- Visual design:
-  - Lilac pegboard-style canvas background
-  - 3D purple gradient controls
-  - Full logo in expanded mode, compact logo in collapsed mode
-
-## Logo Assets
-
-- Expanded logo: `./assets/images/SpeechFlow.png`
-- Collapsed logo: `./assets/images/spflowlogosmall.png`
+## Update Report
+- [speechflow-v0.1-updates.md](./speechflow-v0.1-updates.md)
 
 ## Run Locally
-
-This is a static web app.
-
-1. Open `index.html` directly in a modern Chromium-based browser, or
-2. Serve the directory with any static file server.
-
-Example:
+Open `index.html` in a modern Chromium-based browser, or serve the directory:
 
 ```bash
 python3 -m http.server 8080
 ```
-
-Then open:
-
-- [http://localhost:8080](http://localhost:8080)
-
-## Data Storage
-
-The app stores map/session data in `localStorage`, including:
-
-- `bubbleHistory` (undo/redo timeline)
-- `mapDatabase` (saved map records for history modal)
-
-## Notes
-
-- The app relies on browser speech APIs (`SpeechRecognition` / `webkitSpeechRecognition`) and speech synthesis availability.
-- For best experience, use latest Chrome.
