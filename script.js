@@ -213,7 +213,9 @@ const DEFAULT_BUBBLE_TYPE_LABELS = {
 let bubbleTypeLabels = { ...DEFAULT_BUBBLE_TYPE_LABELS };
 let bubbleTypesLocked = false;
 let mapName = 'Untitled Map';
-let isBubbleColumnCollapsed = window.matchMedia('(max-width: 900px)').matches;
+const mobileSidebarMediaQuery = window.matchMedia('(max-width: 900px), (pointer: coarse)');
+let isBubbleColumnCollapsed = mobileSidebarMediaQuery.matches;
+let hasManualSidebarToggle = false;
 let collapsedAudioStep = 0;
 let mapDatabase = [];
 let activeMapId = null;
@@ -504,6 +506,12 @@ function updateBubbleColumnLayout() {
     if (icon) icon.textContent = isBubbleColumnCollapsed ? '▸' : '◂';
   }
   updateAudioControlsUI();
+}
+
+function applyResponsiveSidebarDefault(force = false) {
+  if (!force && hasManualSidebarToggle) return;
+  isBubbleColumnCollapsed = mobileSidebarMediaQuery.matches;
+  updateBubbleColumnLayout();
 }
 
 function updateAudioControlsUI() {
@@ -868,8 +876,19 @@ if (importMapIconBtn) {
 
 if (toggleBubbleColumnBtn) {
   toggleBubbleColumnBtn.addEventListener('click', () => {
+    hasManualSidebarToggle = true;
     isBubbleColumnCollapsed = !isBubbleColumnCollapsed;
     updateBubbleColumnLayout();
+  });
+}
+
+if (mobileSidebarMediaQuery?.addEventListener) {
+  mobileSidebarMediaQuery.addEventListener('change', () => {
+    applyResponsiveSidebarDefault(false);
+  });
+} else if (mobileSidebarMediaQuery?.addListener) {
+  mobileSidebarMediaQuery.addListener(() => {
+    applyResponsiveSidebarDefault(false);
   });
 }
 
@@ -1575,7 +1594,7 @@ let playbackPaused = false;
 let playbackIndex = 0;
 let orderedPlayback = [];
 
-updateBubbleColumnLayout();
+applyResponsiveSidebarDefault(true);
 
 function startPlayback() {
   if (!bubbles.length) return;
@@ -1829,32 +1848,90 @@ connections.forEach((conn, i) => {
 
 function enableDragging(el, data) {
   let isDragging = false, offsetX = 0, offsetY = 0;
+  let activeTouchId = null;
 
-  el.addEventListener('mousedown', e => {
-    if (data.locked) return;
+  function startDrag(clientX, clientY) {
     isDragging = true;
     data.dragging = true;
-    offsetX = screenToWorldX(e.clientX) - data.x;
-    offsetY = e.clientY / zoom - data.y + camY;
-  });
+    offsetX = screenToWorldX(clientX) - data.x;
+    offsetY = clientY / zoom - data.y + camY;
+  }
 
-  document.addEventListener('mousemove', e => {
-    if (!isDragging) return;
-    data.x = screenToWorldX(e.clientX) - offsetX;
-    data.y = (e.clientY / zoom - offsetY) + camY;
+  function moveDrag(clientX, clientY) {
+    data.x = screenToWorldX(clientX) - offsetX;
+    data.y = (clientY / zoom - offsetY) + camY;
     clampBubbleToWorkspace(data);
     data.updatedAt = new Date().toISOString();
-  });
+  }
 
-document.addEventListener('mouseup', () => {
-  if (isDragging) {
+  function finishDrag() {
+    if (!isDragging) return;
     isDragging = false;
     data.dragging = false;
+    activeTouchId = null;
     resolveBubbleCollision(data);
     data.updatedAt = new Date().toISOString();
     saveSnapshot();
   }
+
+  el.addEventListener('mousedown', e => {
+    if (data.locked) return;
+    if (e.button !== 0) return;
+    startDrag(e.clientX, e.clientY);
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    moveDrag(e.clientX, e.clientY);
+  });
+
+document.addEventListener('mouseup', () => {
+  finishDrag();
 });
+
+  el.addEventListener('touchstart', (e) => {
+    if (data.locked) return;
+    if (activeTouchId !== null) return;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    activeTouchId = touch.identifier;
+    startDrag(touch.clientX, touch.clientY);
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!isDragging || activeTouchId === null) return;
+    let activeTouch = null;
+    for (let i = 0; i < e.changedTouches.length; i += 1) {
+      if (e.changedTouches[i].identifier === activeTouchId) {
+        activeTouch = e.changedTouches[i];
+        break;
+      }
+    }
+    if (!activeTouch) return;
+    moveDrag(activeTouch.clientX, activeTouch.clientY);
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', (e) => {
+    if (activeTouchId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i += 1) {
+      if (e.changedTouches[i].identifier === activeTouchId) {
+        finishDrag();
+        break;
+      }
+    }
+  });
+
+  document.addEventListener('touchcancel', (e) => {
+    if (activeTouchId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i += 1) {
+      if (e.changedTouches[i].identifier === activeTouchId) {
+        finishDrag();
+        break;
+      }
+    }
+  });
 
 }
 
