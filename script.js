@@ -11,6 +11,12 @@ const persistenceModule = speechFlowCore.persistence;
 const speechModule = speechFlowCore.speech;
 const graphModule = speechFlowCore.graph;
 const layoutModule = speechFlowCore.layout;
+const voiceStateModule = speechFlowCore.voiceState;
+const voiceErrorsModule = speechFlowCore.voiceErrors;
+const voiceParserModule = speechFlowCore.voiceParser;
+const voiceRouterModule = speechFlowCore.voiceRouter;
+const voiceRecognitionModule = speechFlowCore.voiceRecognition;
+const voiceSettingsModule = speechFlowCore.voiceSettings;
 
 function getSidebarWidth() {
   if (!sidebarEl) return 280;
@@ -19,6 +25,32 @@ function getSidebarWidth() {
 
 function getWorkspaceWidth() {
   return Math.max(window.innerWidth - getSidebarWidth(), 1);
+}
+
+const WORKSPACE_MIN_WIDTH = 3200;
+const WORKSPACE_MIN_HEIGHT = 2200;
+const WORKSPACE_PADDING = 400;
+
+function getWorkspaceSurfaceSize() {
+  const viewportWidth = Math.max(getWorkspaceWidth(), 1);
+  const viewportHeight = Math.max(window.innerHeight, 1);
+
+  let maxProjectedX = viewportWidth;
+  let maxProjectedY = viewportHeight;
+
+  if (Array.isArray(bubbles) && bubbles.length) {
+    bubbles.forEach((bubble) => {
+      const projectedX = (bubble.x - camX) * zoom + 320;
+      const projectedY = (bubble.y - camY) * zoom + 220;
+      if (projectedX > maxProjectedX) maxProjectedX = projectedX;
+      if (projectedY > maxProjectedY) maxProjectedY = projectedY;
+    });
+  }
+
+  return {
+    width: Math.max(WORKSPACE_MIN_WIDTH, viewportWidth * 2, maxProjectedX + WORKSPACE_PADDING),
+    height: Math.max(WORKSPACE_MIN_HEIGHT, viewportHeight * 2, maxProjectedY + WORKSPACE_PADDING)
+  };
 }
 
 function getWorkspaceCenterWorld() {
@@ -181,7 +213,7 @@ const DEFAULT_BUBBLE_TYPE_LABELS = {
 let bubbleTypeLabels = { ...DEFAULT_BUBBLE_TYPE_LABELS };
 let bubbleTypesLocked = false;
 let mapName = 'Untitled Map';
-let isBubbleColumnCollapsed = false;
+let isBubbleColumnCollapsed = window.matchMedia('(max-width: 900px)').matches;
 let collapsedAudioStep = 0;
 let mapDatabase = [];
 let activeMapId = null;
@@ -222,6 +254,26 @@ const audioPauseResumeIcon = audioPauseResumeToggle?.querySelector('.btn-icon');
 const audioPauseResumeLabel = audioPauseResumeToggle?.querySelector('.btn-label');
 const audioSingleIcon = audioSingleToggle?.querySelector('.btn-icon');
 const audioSingleLabel = audioSingleToggle?.querySelector('.btn-label');
+const voiceStatusEl = document.querySelector('#audioControlsBar .status');
+const voiceStatusIconEl = voiceStatusEl?.querySelector('.status-icon');
+const voiceStatusLabelEl = voiceStatusEl?.querySelector('.status-label');
+const voiceErrorMessageEl = document.getElementById('voiceErrorMessage');
+const voiceTranscriptTextEl = document.getElementById('voiceTranscriptText');
+const voiceModeHintEl = document.getElementById('voiceModeHint');
+const voiceSettingsBtn = document.getElementById('voiceSettingsBtn');
+const voiceSettingsModal = document.getElementById('voiceSettingsModal');
+const voiceLanguageInput = document.getElementById('voiceLanguageInput');
+const voiceAutoRestartInput = document.getElementById('voiceAutoRestartInput');
+const voiceWakePhraseEnabledInput = document.getElementById('voiceWakePhraseEnabledInput');
+const voiceWakePhraseInput = document.getElementById('voiceWakePhraseInput');
+const voicePushToTalkInput = document.getElementById('voicePushToTalkInput');
+const voiceConfidenceThresholdInput = document.getElementById('voiceConfidenceThresholdInput');
+const voicePlaybackRateInput = document.getElementById('voicePlaybackRateInput');
+const voicePlaybackPitchInput = document.getElementById('voicePlaybackPitchInput');
+const voicePlaybackVoiceInput = document.getElementById('voicePlaybackVoiceInput');
+const voiceSettingsError = document.getElementById('voiceSettingsError');
+const voiceSettingsSave = document.getElementById('voiceSettingsSave');
+const voiceSettingsCancel = document.getElementById('voiceSettingsCancel');
 const bubbleEditorModal = document.getElementById('bubbleEditorModal');
 const bubbleEditorMeta = document.getElementById('bubbleEditorMeta');
 const bubbleEditorInputArea = document.getElementById('bubbleEditorInputArea');
@@ -233,6 +285,58 @@ const bubbleEditorError = document.getElementById('bubbleEditorError');
 const bubbleEditorApply = document.getElementById('bubbleEditorApply');
 const bubbleEditorClose = document.getElementById('bubbleEditorClose');
 let bubbleEditorState = { bubbleData: null, action: null };
+let voiceSettings = voiceSettingsModule?.loadSettings
+  ? voiceSettingsModule.loadSettings()
+  : {
+    language: 'en-US',
+    autoRestart: true,
+    wakePhraseEnabled: false,
+    wakePhrase: 'speechflow',
+    pushToTalkEnabled: false,
+    confidenceThreshold: 0,
+    playbackRate: 1,
+    playbackPitch: 1,
+    playbackVoice: ''
+  };
+let lastKnownVoiceState = 'idle';
+
+function updateVoiceTranscriptDisplay(value) {
+  if (!voiceTranscriptTextEl) return;
+  const text = String(value || '').trim();
+  voiceTranscriptTextEl.textContent = text || 'No voice input yet.';
+}
+
+function toTitleCaseWords(input) {
+  return String(input || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function isAnyModalOpen() {
+  return !!document.querySelector('.modal:not(.hidden)');
+}
+
+function updateVoiceModeHint() {
+  if (!voiceModeHintEl) return;
+  const modeParts = [];
+  modeParts.push(voiceSettings.pushToTalkEnabled ? 'Push-to-talk (hold Space)' : 'Always listening');
+  if (voiceSettings.wakePhraseEnabled) {
+    modeParts.push(`Wake phrase: "${voiceSettings.wakePhrase}"`);
+  } else {
+    modeParts.push('Wake phrase: off');
+  }
+  modeParts.push(`State: ${toTitleCaseWords(lastKnownVoiceState.replace(/_/g, ' '))}`);
+  voiceModeHintEl.textContent = `Voice mode: ${modeParts.join(' | ')}`;
+}
+
+function isEditableTarget(target) {
+  if (!target) return false;
+  const tagName = (target.tagName || '').toLowerCase();
+  if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') return true;
+  return !!target.isContentEditable;
+}
 
 function titleCaseFirst(input) {
   if (!input) return input;
@@ -811,6 +915,71 @@ if (promptModalInput) {
   });
 }
 
+if (voiceSettingsBtn) {
+  voiceSettingsBtn.addEventListener('click', openVoiceSettingsModal);
+}
+
+if (voiceSettingsCancel) {
+  voiceSettingsCancel.addEventListener('click', closeVoiceSettingsModal);
+}
+
+if (voiceSettingsSave) {
+  voiceSettingsSave.addEventListener('click', () => {
+    const nextSettingsInput = collectVoiceSettingsFromForm();
+    const sanitized = voiceSettingsModule?.sanitizeSettings
+      ? voiceSettingsModule.sanitizeSettings(nextSettingsInput)
+      : nextSettingsInput;
+
+    if (!sanitized.language) {
+      if (voiceSettingsError) {
+        voiceSettingsError.textContent = 'Language is required.';
+        voiceSettingsError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (sanitized.wakePhraseEnabled && !normalizeWakePhraseInput(sanitized.wakePhrase)) {
+      if (voiceSettingsError) {
+        voiceSettingsError.textContent = 'Wake phrase is required when wake phrase mode is enabled.';
+        voiceSettingsError.classList.remove('hidden');
+      }
+      return;
+    }
+
+    voiceSettings = voiceSettingsModule?.saveSettings
+      ? voiceSettingsModule.saveSettings(sanitized)
+      : sanitized;
+    applyVoiceSettingsToForm();
+    applyVoiceSettingsRuntime();
+    closeVoiceSettingsModal();
+  });
+}
+
+if (voiceWakePhraseEnabledInput) {
+  voiceWakePhraseEnabledInput.addEventListener('change', () => {
+    if (!voiceWakePhraseInput) return;
+    const enabled = !!voiceWakePhraseEnabledInput.checked;
+    voiceWakePhraseInput.disabled = !enabled;
+    if (enabled) voiceWakePhraseInput.focus();
+  });
+}
+
+if (voiceSettingsModal) {
+  voiceSettingsModal.addEventListener('click', (e) => {
+    if (e.target === voiceSettingsModal) closeVoiceSettingsModal();
+  });
+}
+
+if (window.speechSynthesis?.onvoiceschanged !== undefined) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    refreshVoiceList();
+  };
+}
+
+refreshVoiceList();
+applyVoiceSettingsToForm();
+updateVoiceTranscriptDisplay('');
+
 setMapName('Untitled Map');
 applyBubbleTypeConfig({ labels: DEFAULT_BUBBLE_TYPE_LABELS, locked: false, usePlaceholders: true });
 loadMapDatabase();
@@ -883,11 +1052,7 @@ function findValidBubblePosition(parent, bubbleWidth = 220, bubbleHeight = 100) 
 
 
 
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recognition = new SpeechRecognition();
-recognition.continuous = true;
-recognition.interimResults = false;
-recognition.lang = 'en-US';
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const controlPanel = document.getElementById('controlPanel');
 const canvas = document.getElementById('connections');
@@ -950,42 +1115,84 @@ function handleWorkspaceWheelZoom(e) {
 
 window.addEventListener('wheel', handleWorkspaceWheelZoom, { passive: false });
 
-recognition.onresult = (e) => {
-  const last = e.results.length - 1;
-  const raw = e.results[last][0].transcript.trim();
-  const text = raw.toLowerCase();
+const fallbackVoiceStateMachine = {
+  STATES: {
+    IDLE: 'idle',
+    REQUESTING_PERMISSION: 'requesting_permission',
+    LISTENING: 'listening',
+    PROCESSING: 'processing',
+    SPEAKING: 'speaking',
+    PAUSED: 'paused',
+    ERROR: 'error'
+  },
+  transition: () => null,
+  setError: () => null,
+  getState: () => ({ state: 'idle', lastError: null })
+};
 
-  if (handleTriggers(text)) return;
+const voiceStateMachine = voiceStateModule?.createVoiceStateMachine
+  ? voiceStateModule.createVoiceStateMachine({
+    onChange: ({ state, lastError }) => {
+      lastKnownVoiceState = state || 'idle';
+      if (voiceStatusLabelEl) voiceStatusLabelEl.textContent = toTitleCaseWords(state.replace(/_/g, ' '));
+      if (voiceStatusIconEl) {
+        if (state === 'error') voiceStatusIconEl.textContent = '⚠️';
+        else if (state === 'listening') voiceStatusIconEl.textContent = '🎙️';
+        else if (state === 'processing') voiceStatusIconEl.textContent = '🧠';
+        else if (state === 'speaking') voiceStatusIconEl.textContent = '🔊';
+        else if (state === 'paused') voiceStatusIconEl.textContent = '⏸️';
+        else voiceStatusIconEl.textContent = '🎙️';
+      }
+      if (!voiceErrorMessageEl) return;
+      if (lastError?.message) {
+        voiceErrorMessageEl.textContent = lastError.message;
+        voiceErrorMessageEl.classList.remove('hidden');
+      } else {
+        voiceErrorMessageEl.textContent = '';
+        voiceErrorMessageEl.classList.add('hidden');
+      }
+      updateVoiceModeHint();
+    }
+  })
+  : fallbackVoiceStateMachine;
 
-  let transcript = raw;
+function transitionVoiceStateSafe(nextState, meta) {
+  try {
+    voiceStateMachine.transition(nextState, meta);
+  } catch (error) {
+    // Ignore illegal transitions to keep runtime stable.
+  }
+}
 
-  if (lastSpokenIntent === 'question' && transcript.toLowerCase().startsWith("question ")) {
+function createBubbleFromVoiceTranscript(rawTranscript) {
+  if (!rawTranscript) return;
+  let transcript = rawTranscript.trim();
+  if (!transcript) return;
+
+  if (lastSpokenIntent === 'question' && transcript.toLowerCase().startsWith('question ')) {
     transcript = transcript.slice(9).trim();
   }
 
   transcript = transcript.charAt(0).toUpperCase() + transcript.slice(1);
-
   if (lastSpokenIntent === 'question' && !transcript.endsWith('?')) {
     transcript += '?';
   }
 
-  if (handleTriggers(text)) return;
-
-  let x, y;
+  let x;
+  let y;
   if (pendingConnectionFrom) {
     const pos = findValidBubblePosition(pendingConnectionFrom);
     x = pos.x;
     y = pos.y;
   } else {
-const canvasWidth = getWorkspaceWidth();
-
-x = camX + Math.random() * (canvasWidth - 100); // buffer for bubble width
-y = camY + Math.random() * (window.innerHeight - 100);
+    const canvasWidth = getWorkspaceWidth();
+    x = camX + Math.random() * Math.max(canvasWidth - 100, 1);
+    y = camY + Math.random() * (window.innerHeight - 100);
   }
   x = Math.max(x, camX);
 
   const bubble = document.createElement('div');
-  bubble.style.position = 'absolute'; // ✅ REQUIRED
+  bubble.style.position = 'absolute';
 
   const normalizedNode = defaultNodeData(
     null,
@@ -994,6 +1201,7 @@ y = camY + Math.random() * (window.innerHeight - 100);
     y,
     lastSpokenIntent || 'idea'
   );
+
   const data = {
     el: bubble,
     id: normalizedNode.id,
@@ -1015,56 +1223,44 @@ y = camY + Math.random() * (window.innerHeight - 100);
     createdAt: normalizedNode.createdAt,
     updatedAt: normalizedNode.updatedAt
   };
+
   bubble.className = `bubble ${data.type}`;
   const textSpan = document.createElement('span');
-textSpan.className = 'bubble-text';
-textSpan.textContent = normalizedNode.text;
-bubble.appendChild(textSpan);
-data.textEl = textSpan;
+  textSpan.className = 'bubble-text';
+  textSpan.textContent = normalizedNode.text;
+  bubble.appendChild(textSpan);
+  data.textEl = textSpan;
 
-  
   const idLabel = document.createElement('div');
-idLabel.className = 'bubble-id-label';
-bubble.appendChild(idLabel);
-data.idLabel = idLabel;
+  idLabel.className = 'bubble-id-label';
+  bubble.appendChild(idLabel);
+  data.idLabel = idLabel;
   applyBubbleVisualState(data);
 
   bubble.style.opacity = 0;
-  updateSidebar();
   document.body.appendChild(bubble);
-
-  
-
   attachBubbleDblClickHandler(bubble, data);
-  updateSidebar();
 
   bubble.addEventListener('click', () => {
-    if (isConnectMode) {
-      if (!selectedBubble) {
-        selectedBubble = data;
-        bubble.style.outline = '2px solid yellow';
-      } else {
-        addConnection(selectedBubble, data, { label: '' });
-
-        selectedBubble.el.style.outline = '';
-        selectedBubble = null;
-      }
+    if (!isConnectMode) return;
+    if (!selectedBubble) {
+      selectedBubble = data;
+      bubble.style.outline = '2px solid yellow';
+      return;
     }
+    addConnection(selectedBubble, data, { label: '' });
+    selectedBubble.el.style.outline = '';
+    selectedBubble = null;
   });
 
   enableDragging(bubble, data);
   enableBubbleInteractions(bubble, data);
 
-bubbles.push(data);
-syncCoreGraphState();
-lastSpokenIntent = null;
-
-
-
-  updateSidebar();
+  bubbles.push(data);
+  syncCoreGraphState();
+  lastSpokenIntent = null;
   updateBubbleIds();
   updateSidebar();
-
 
   if (pendingConnectionFrom) {
     setTimeout(() => {
@@ -1072,51 +1268,288 @@ lastSpokenIntent = null;
       pendingConnectionFrom = null;
       bubble.style.opacity = 1;
     }, 300);
-  } else {
-    bubble.style.opacity = 1;
+    return;
   }
-};
+  bubble.style.opacity = 1;
+}
 
-function handleTriggers(text) {
-  if (text.includes('clear')) {
-    clearMapData();
-    saveSnapshot();
-    return true;
+function selectBubbleByIndex(targetIndex) {
+  if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= bubbles.length) return;
+  const target = bubbles[targetIndex];
+  makeBubbleActive(target);
+  camX = target.x - getWorkspaceWidth() / 2 / zoom;
+  camY = target.y - window.innerHeight / 2 / zoom;
+  clampCameraToWorkspace();
+}
+
+function setConnectModeFromVoice(enabled) {
+  isConnectMode = !!enabled;
+  selectedBubble = null;
+  updateVoiceTranscriptDisplay(`Connect mode ${isConnectMode ? 'enabled' : 'disabled'}.`);
+}
+
+function toggleConnectModeFromVoice() {
+  setConnectModeFromVoice(!isConnectMode);
+}
+
+function clearMapFromVoice() {
+  clearMapData();
+  saveSnapshot();
+  updateVoiceTranscriptDisplay('Map cleared.');
+}
+
+function addBubbleFromVoice(transcript) {
+  const text = String(transcript || '').trim() || 'New idea';
+  createBubbleFromVoiceTranscript(text);
+}
+
+function deleteSelectedBubbleFromVoice() {
+  if (!activeBubble) {
+    updateVoiceTranscriptDisplay('No active bubble selected to delete.');
+    return;
   }
+  removeBubble(activeBubble, true);
+  updateVoiceTranscriptDisplay('Selected bubble deleted.');
+}
 
-  if (text.includes('connect mode')) {
-    isConnectMode = !isConnectMode;
-    selectedBubble = null;
-    alert(`Connect mode ${isConnectMode ? 'enabled' : 'disabled'}`);
-    return true;
+function setLockSelectedBubbleFromVoice(locked) {
+  if (!activeBubble) {
+    updateVoiceTranscriptDisplay('No active bubble selected.');
+    return;
   }
+  activeBubble.locked = !!locked;
+  activeBubble.el.classList.toggle('locked', activeBubble.locked);
+  saveSnapshot();
+  updateVoiceTranscriptDisplay(`Selected bubble ${activeBubble.locked ? 'locked' : 'unlocked'}.`);
+}
 
-  if (text.startsWith('question ')) {
-    lastSpokenIntent = 'question';
-    return false; // allow bubble creation to proceed
+function applyTypedIntent(intentName) {
+  const intentToType = {
+    set_question_intent: 'question',
+    set_task_intent: 'task',
+    set_note_intent: 'note',
+    set_blocker_intent: 'blocker',
+    set_idea_intent: 'idea'
+  };
+  const nextType = intentToType[intentName] || 'idea';
+  lastSpokenIntent = nextType;
+}
+
+function showVoiceHelpFromVoice() {
+  const entries = voiceParserModule?.getCommandReference ? voiceParserModule.getCommandReference() : [];
+  if (!entries.length) {
+    updateVoiceTranscriptDisplay('Voice help unavailable.');
+    return;
   }
+  const preview = entries.slice(0, 10).map((entry) => entry.phrases[0]).join(' | ');
+  updateVoiceTranscriptDisplay(`Voice commands: ${preview}`);
+}
 
-  const bubbleMatch = text.match(/^bubble\s+(\d+)\b/);
-  if (bubbleMatch) {
-    const bubbleNumber = parseInt(bubbleMatch[1], 10);
-    const targetIndex = bubbleNumber - 1;
-    if (targetIndex >= 0 && targetIndex < bubbles.length) {
-      const target = bubbles[targetIndex];
-      makeBubbleActive(target);
-      camX = target.x - getWorkspaceWidth() / 2 / zoom;
-      camY = target.y - window.innerHeight / 2 / zoom;
-      clampCameraToWorkspace();
-    }
-    return true;
+function getDestructiveVoiceConfirmMessage(parsed) {
+  if (parsed?.intent === 'clear_map') return 'Voice command received: clear map. Continue?';
+  if (parsed?.intent === 'delete_selected_bubble') return 'Voice command received: delete selected bubble. Continue?';
+  return 'Voice command is destructive. Continue?';
+}
+
+function normalizeWakePhraseInput(input) {
+  return String(input || '').trim().toLowerCase();
+}
+
+function stripWakePhraseIfNeeded(rawTranscript) {
+  const transcript = String(rawTranscript || '').trim();
+  if (!voiceSettings.wakePhraseEnabled) return transcript;
+  const wakePhrase = normalizeWakePhraseInput(voiceSettings.wakePhrase);
+  if (!wakePhrase) return '';
+  const lowered = transcript.toLowerCase();
+  if (!lowered.startsWith(wakePhrase)) return '';
+  return transcript.slice(wakePhrase.length).trim();
+}
+
+function applyVoiceSettingsToForm() {
+  if (voiceLanguageInput) voiceLanguageInput.value = voiceSettings.language;
+  if (voiceAutoRestartInput) voiceAutoRestartInput.checked = !!voiceSettings.autoRestart;
+  if (voiceWakePhraseEnabledInput) voiceWakePhraseEnabledInput.checked = !!voiceSettings.wakePhraseEnabled;
+  if (voiceWakePhraseInput) {
+    voiceWakePhraseInput.value = voiceSettings.wakePhrase;
+    voiceWakePhraseInput.disabled = !voiceSettings.wakePhraseEnabled;
   }
+  if (voicePushToTalkInput) voicePushToTalkInput.checked = !!voiceSettings.pushToTalkEnabled;
+  if (voiceConfidenceThresholdInput) voiceConfidenceThresholdInput.value = String(voiceSettings.confidenceThreshold);
+  if (voicePlaybackRateInput) voicePlaybackRateInput.value = String(voiceSettings.playbackRate);
+  if (voicePlaybackPitchInput) voicePlaybackPitchInput.value = String(voiceSettings.playbackPitch);
+  if (voicePlaybackVoiceInput) voicePlaybackVoiceInput.value = voiceSettings.playbackVoice;
+  updateVoiceModeHint();
+}
 
-  return false;
+function collectVoiceSettingsFromForm() {
+  return {
+    language: voiceLanguageInput?.value || 'en-US',
+    autoRestart: !!voiceAutoRestartInput?.checked,
+    wakePhraseEnabled: !!voiceWakePhraseEnabledInput?.checked,
+    wakePhrase: voiceWakePhraseInput?.value || 'speechflow',
+    pushToTalkEnabled: !!voicePushToTalkInput?.checked,
+    confidenceThreshold: parseFloat(voiceConfidenceThresholdInput?.value || '0'),
+    playbackRate: parseFloat(voicePlaybackRateInput?.value || '1'),
+    playbackPitch: parseFloat(voicePlaybackPitchInput?.value || '1'),
+    playbackVoice: voicePlaybackVoiceInput?.value || ''
+  };
+}
+
+function refreshVoiceList() {
+  if (!voicePlaybackVoiceInput || !window.speechSynthesis?.getVoices) return;
+  const voices = window.speechSynthesis.getVoices();
+  const previous = voicePlaybackVoiceInput.value;
+  voicePlaybackVoiceInput.innerHTML = '';
+
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'System Default';
+  voicePlaybackVoiceInput.appendChild(defaultOption);
+
+  voices.forEach((voice) => {
+    const option = document.createElement('option');
+    option.value = voice.name;
+    option.textContent = `${voice.name} (${voice.lang})`;
+    voicePlaybackVoiceInput.appendChild(option);
+  });
+
+  if (voiceSettings.playbackVoice) {
+    voicePlaybackVoiceInput.value = voiceSettings.playbackVoice;
+  } else if (previous) {
+    voicePlaybackVoiceInput.value = previous;
+  }
+}
+
+function closeVoiceSettingsModal() {
+  if (!voiceSettingsModal) return;
+  voiceSettingsModal.classList.add('hidden');
+  voiceSettingsModal.setAttribute('aria-hidden', 'true');
+  if (voiceSettingsError) {
+    voiceSettingsError.classList.add('hidden');
+    voiceSettingsError.textContent = '';
+  }
+}
+
+function openVoiceSettingsModal() {
+  if (!voiceSettingsModal) return;
+  applyVoiceSettingsToForm();
+  refreshVoiceList();
+  if (voiceSettingsError) {
+    voiceSettingsError.classList.add('hidden');
+    voiceSettingsError.textContent = '';
+  }
+  voiceSettingsModal.classList.remove('hidden');
+  voiceSettingsModal.setAttribute('aria-hidden', 'false');
+}
+
+const voiceRouter = voiceRouterModule?.createVoiceRouter && voiceParserModule?.parseVoiceInput
+  ? voiceRouterModule.createVoiceRouter({
+    parser: voiceParserModule,
+    confirmDestructive: (parsed) => confirm(getDestructiveVoiceConfirmMessage(parsed)),
+    onSelectBubble: (args) => selectBubbleByIndex(args.bubbleIndex),
+    onToggleConnectMode: () => toggleConnectModeFromVoice(),
+    onSetConnectModeOn: () => setConnectModeFromVoice(true),
+    onSetConnectModeOff: () => setConnectModeFromVoice(false),
+    onClearMap: () => clearMapFromVoice(),
+    onStartPlayback: () => startPlayback(),
+    onStopPlayback: () => stopPlayback(),
+    onPausePlayback: () => pausePlayback(),
+    onResumePlayback: () => resumePlayback(),
+    onUndo: () => undo(),
+    onRedo: () => redo(),
+    onAddBubble: (args) => addBubbleFromVoice(args.transcript),
+    onDeleteSelectedBubble: () => deleteSelectedBubbleFromVoice(),
+    onLockSelectedBubble: () => setLockSelectedBubbleFromVoice(true),
+    onUnlockSelectedBubble: () => setLockSelectedBubbleFromVoice(false),
+    onSnapCenter: () => controlPanel.querySelector('#snapCenter')?.click(),
+    onOpenPromptModal: () => openPromptModal(),
+    onOpenVoiceSettings: () => openVoiceSettingsModal(),
+    onCloseVoiceSettings: () => closeVoiceSettingsModal(),
+    onVoiceHelp: () => showVoiceHelpFromVoice(),
+    onTypedIntent: (intentName) => {
+      applyTypedIntent(intentName);
+    },
+    onDictation: (transcript) => createBubbleFromVoiceTranscript(transcript),
+    onIntent: () => {}
+  })
+  : null;
+
+const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitionController
+  ? voiceRecognitionModule.createVoiceRecognitionController({
+    RecognitionCtor: SpeechRecognitionCtor,
+    language: voiceSettings.language || 'en-US',
+    continuous: true,
+    interimResults: false,
+    autoRestart: voiceSettings.autoRestart !== false,
+    voiceState: voiceStateMachine,
+    mapError: (event) => voiceErrorsModule?.normalizeRecognitionError
+      ? voiceErrorsModule.normalizeRecognitionError(event)
+      : {
+        code: event?.error || 'unknown_error',
+        message: `Speech recognition error: ${event?.error || 'unknown'}`,
+        recoverable: true,
+        restart: true
+      },
+    onResult: (transcript, event) => {
+      if (isAnyModalOpen()) {
+        updateVoiceTranscriptDisplay('Voice input paused while a modal is open.');
+        return;
+      }
+      const confidence = Number(event?.results?.[event.results.length - 1]?.[0]?.confidence);
+      if (Number.isFinite(confidence) && confidence < voiceSettings.confidenceThreshold) {
+        updateVoiceTranscriptDisplay(`Ignored low-confidence input (${confidence.toFixed(2)}).`);
+        return;
+      }
+      updateVoiceTranscriptDisplay(transcript);
+      const routedTranscript = stripWakePhraseIfNeeded(transcript);
+      if (voiceSettings.wakePhraseEnabled && !routedTranscript) {
+        updateVoiceTranscriptDisplay('Wake phrase required.');
+        return;
+      }
+      if (voiceRouter) {
+        voiceRouter.route(routedTranscript);
+        return;
+      }
+      createBubbleFromVoiceTranscript(routedTranscript);
+    },
+    onRecognitionError: () => {}
+  })
+  : null;
+
+function applyVoiceSettingsRuntime() {
+  if (!voiceRecognitionController) return;
+  voiceRecognitionController.setLanguage?.(voiceSettings.language || 'en-US');
+  voiceRecognitionController.setAutoRestart?.(voiceSettings.autoRestart !== false);
+
+  if (voiceSettings.pushToTalkEnabled) {
+    voiceRecognitionController.stopListening();
+    transitionVoiceStateSafe(voiceStateMachine.STATES.IDLE, { source: 'push_to_talk_enabled' });
+    updateVoiceTranscriptDisplay('Push-to-talk enabled. Hold Space to speak.');
+    updateVoiceModeHint();
+    return;
+  }
+  voiceRecognitionController.startListening();
+  updateVoiceModeHint();
+}
+
+if (voiceRecognitionController) {
+  applyVoiceSettingsRuntime();
+} else if (voiceErrorMessageEl) {
+  lastKnownVoiceState = 'error';
+  voiceErrorMessageEl.textContent = 'Speech recognition is unavailable in this browser.';
+  voiceErrorMessageEl.classList.remove('hidden');
+  updateVoiceModeHint();
 }
 
 
 function speakText(text) {
   if (speechModule?.speak) {
-    speechModule.speak(text, { rate: 1, pitch: 1, lang: 'en-US' });
+    speechModule.speak(text, {
+      rate: voiceSettings.playbackRate,
+      pitch: voiceSettings.playbackPitch,
+      lang: voiceSettings.language,
+      voiceName: voiceSettings.playbackVoice
+    });
     return;
   }
 
@@ -1126,9 +1559,13 @@ function speakText(text) {
   }
 
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1; // Adjust rate if needed
-  utterance.pitch = 1;
-  utterance.lang = 'en-US';
+  utterance.rate = voiceSettings.playbackRate;
+  utterance.pitch = voiceSettings.playbackPitch;
+  utterance.lang = voiceSettings.language || 'en-US';
+  if (voiceSettings.playbackVoice && window.speechSynthesis?.getVoices) {
+    const voice = window.speechSynthesis.getVoices().find((item) => item?.name === voiceSettings.playbackVoice);
+    if (voice) utterance.voice = voice;
+  }
   window.speechSynthesis.speak(utterance);
 }
 
@@ -1142,6 +1579,7 @@ updateBubbleColumnLayout();
 
 function startPlayback() {
   if (!bubbles.length) return;
+  transitionVoiceStateSafe(voiceStateMachine.STATES.SPEAKING, { source: 'start_playback' });
   playbackActive = true;
   playbackPaused = false;
   collapsedAudioStep = 1;
@@ -1174,6 +1612,7 @@ function stopPlayback() {
   orderedPlayback = [];
   playbackIndex = 0;
   window.speechSynthesis.cancel();
+  transitionVoiceStateSafe(voiceStateMachine.STATES.LISTENING, { source: 'stop_playback' });
   collapsedAudioStep = 0;
   updateAudioControlsUI();
 }
@@ -1182,6 +1621,7 @@ function pausePlayback() {
   if (!playbackActive || playbackPaused) return;
   playbackPaused = true;
   window.speechSynthesis.pause();
+  transitionVoiceStateSafe(voiceStateMachine.STATES.PAUSED, { source: 'pause_playback' });
   collapsedAudioStep = 2;
   updateAudioControlsUI();
 }
@@ -1190,6 +1630,7 @@ function resumePlayback() {
   if (!playbackActive || !playbackPaused) return;
   playbackPaused = false;
   window.speechSynthesis.resume();
+  transitionVoiceStateSafe(voiceStateMachine.STATES.SPEAKING, { source: 'resume_playback' });
   collapsedAudioStep = 3;
   updateAudioControlsUI();
   playNextBubble();
@@ -1289,10 +1730,14 @@ clickLayer.addEventListener('click', e => {
 
 
 function animate() {
-canvas.width = getWorkspaceWidth();
-canvas.height = window.innerHeight;
+const surface = getWorkspaceSurfaceSize();
+
+canvas.width = surface.width;
+canvas.height = surface.height;
 canvas.style.left = `${getSidebarWidth()}px`;
-canvas.style.width = `${getWorkspaceWidth()}px`;
+canvas.style.top = '0px';
+canvas.style.width = `${surface.width}px`;
+canvas.style.height = `${surface.height}px`;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1335,10 +1780,15 @@ connections.forEach(conn => {
 
   });
 
-clickLayer.width = getWorkspaceWidth();
-clickLayer.height = window.innerHeight;
+clickLayer.width = surface.width;
+clickLayer.height = surface.height;
 clickLayer.style.left = `${getSidebarWidth()}px`;
-clickLayer.style.width = `${getWorkspaceWidth()}px`;
+clickLayer.style.top = '0px';
+clickLayer.style.width = `${surface.width}px`;
+clickLayer.style.height = `${surface.height}px`;
+
+document.body.style.minWidth = `${getSidebarWidth() + surface.width}px`;
+document.body.style.minHeight = `${surface.height}px`;
 
 clickCtx.clearRect(0, 0, clickLayer.width, clickLayer.height);
 clickCtx.lineWidth = 10;
@@ -1408,9 +1858,6 @@ document.addEventListener('mouseup', () => {
 
 }
 
-recognition.onend = () => recognition.start();
-recognition.onerror = e => console.error("Speech error:", e.error);
-recognition.start();
 animate();
 
 let undoStack = [];
@@ -1627,6 +2074,27 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     redo();
   }
+});
+
+window.addEventListener('keydown', (e) => {
+  if (!voiceSettings.pushToTalkEnabled) return;
+  if (e.code !== 'Space') return;
+  if (isEditableTarget(e.target)) return;
+  if (isAnyModalOpen()) return;
+  if (e.repeat) return;
+  e.preventDefault();
+  voiceRecognitionController?.startListening();
+  updateVoiceTranscriptDisplay('Listening (push-to-talk)...');
+});
+
+window.addEventListener('keyup', (e) => {
+  if (!voiceSettings.pushToTalkEnabled) return;
+  if (e.code !== 'Space') return;
+  if (isEditableTarget(e.target)) return;
+  if (isAnyModalOpen()) return;
+  e.preventDefault();
+  voiceRecognitionController?.stopListening();
+  updateVoiceTranscriptDisplay('Push-to-talk released.');
 });
 
 // Restore last session

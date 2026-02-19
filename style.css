@@ -3,9 +3,9 @@
  }
  
 
- body {
+body {
   margin: 0;
-  overflow: hidden;
+  overflow: auto;
   background-color: #e6daf4;
   background-image:
     radial-gradient(circle, rgba(86, 72, 116, 0.26) 1.1px, transparent 1.2px),
@@ -16,7 +16,7 @@
  }
 
  canvas {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   z-index: 0
@@ -105,7 +105,8 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: var(--sidebar-expanded-width);
+  width: min(var(--sidebar-expanded-width), 100vw);
+  max-width: 100vw;
   height: 100vh;
   background: #000000;
   color: white;
@@ -129,7 +130,7 @@
 }
 
 #sidebar.collapsed {
-  width: var(--sidebar-collapsed-width);
+  width: min(var(--sidebar-collapsed-width), 100vw);
 }
 
 #sidebar.collapsed .logo-full {
@@ -341,6 +342,14 @@
   align-items: center;
 }
 
+#sidebar.collapsed .voice-transcript {
+  display: none;
+}
+
+#sidebar.collapsed .voice-hint {
+  display: none;
+}
+
 #bubbleList {
   list-style: none;
   padding: 0;
@@ -413,6 +422,48 @@ button:active {
   margin-bottom: 8px;
 }
 
+.voice-transcript {
+  margin-bottom: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(173, 200, 255, 0.4);
+  background: rgba(25, 40, 88, 0.55);
+  display: grid;
+  gap: 3px;
+}
+
+.voice-transcript-label {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.voice-transcript-text {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-hint {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 222, 255, 0.35);
+  background: rgba(43, 49, 101, 0.45);
+  color: #d8deff;
+  font-size: 11px;
+}
+
+.voice-error {
+  margin-bottom: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 130, 130, 0.45);
+  background: rgba(95, 18, 18, 0.72);
+  color: #ffd6d6;
+  font-size: 12px;
+}
+
 .hidden {
   display: none !important;
 }
@@ -476,7 +527,9 @@ button:active {
 
 #bubbleEditorInputArea input,
 #bubbleEditorInputArea select,
-#mapSetupModal input {
+#mapSetupModal input,
+#voiceSettingsModal input,
+#voiceSettingsModal select {
   width: 100%;
   padding: 8px;
   border-radius: 7px;
@@ -484,6 +537,21 @@ button:active {
   background: #18131f;
   color: #fff;
   margin-bottom: 8px;
+}
+
+.voice-setting-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+#voiceSettingsModal label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: #d7d0e6;
 }
 
 #mapTypeInputs {
