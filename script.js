@@ -115,6 +115,10 @@ function defaultNodeData(raw, text, x, y, type) {
     metadata: raw?.metadata && typeof raw.metadata === 'object' ? raw.metadata : {},
     aiSummary: raw?.aiSummary || '',
     voiceNote: raw?.voiceNote || '',
+    shape: typeof raw?.shape === 'string' ? raw.shape : 'ellipse',
+    width: Number.isFinite(raw?.width) ? raw.width : 180,
+    height: Number.isFinite(raw?.height) ? raw.height : 90,
+    groupId: raw?.groupId || null,
     createdAt: raw?.createdAt || now,
     updatedAt: raw?.updatedAt || now
   };
@@ -141,13 +145,20 @@ function syncCoreGraphState() {
 }
 
 function buildEdge(fromNode, toNode, extra) {
+  const metadataInput = extra?.metadata && typeof extra.metadata === 'object' ? extra.metadata : {};
+  const metadata = {
+    routingMode: metadataInput.routingMode || edgeRoutingMode,
+    orientation: metadataInput.orientation || 'vertical',
+    bendX: Number.isFinite(metadataInput.bendX) ? metadataInput.bendX : undefined,
+    bendY: Number.isFinite(metadataInput.bendY) ? metadataInput.bendY : undefined
+  };
   const payload = {
     from: fromNode,
     to: toNode,
     label: extra?.label || '',
     weight: Number.isFinite(extra?.weight) ? extra.weight : 1,
     type: extra?.type || 'sequence',
-    metadata: extra?.metadata && typeof extra.metadata === 'object' ? extra.metadata : {},
+    metadata,
     id: extra?.id
   };
 
@@ -286,6 +297,29 @@ const bubbleEditorOrderInput = document.getElementById('bubbleEditorOrderInput')
 const bubbleEditorError = document.getElementById('bubbleEditorError');
 const bubbleEditorApply = document.getElementById('bubbleEditorApply');
 const bubbleEditorClose = document.getElementById('bubbleEditorClose');
+const selectionMarqueeEl = document.getElementById('selectionMarquee');
+const toolbarStatusEl = document.getElementById('toolbarStatus');
+const toolSelectBtn = document.getElementById('toolSelect');
+const toolPanBtn = document.getElementById('toolPan');
+const toolConnectBtn = document.getElementById('toolConnect');
+const duplicateSelectionBtn = document.getElementById('duplicateSelectionBtn');
+const deleteSelectionBtn = document.getElementById('deleteSelectionBtn');
+const copySelectionBtn = document.getElementById('copySelectionBtn');
+const cutSelectionBtn = document.getElementById('cutSelectionBtn');
+const pasteSelectionBtn = document.getElementById('pasteSelectionBtn');
+const undoBtn = document.getElementById('undoBtn');
+const redoBtn = document.getElementById('redoBtn');
+const alignLeftBtn = document.getElementById('alignLeftBtn');
+const alignTopBtn = document.getElementById('alignTopBtn');
+const distributeHorizontalBtn = document.getElementById('distributeHorizontalBtn');
+const distributeVerticalBtn = document.getElementById('distributeVerticalBtn');
+const groupSelectionBtn = document.getElementById('groupSelectionBtn');
+const ungroupSelectionBtn = document.getElementById('ungroupSelectionBtn');
+const frameSelectionBtn = document.getElementById('frameSelectionBtn');
+const shapePicker = document.getElementById('shapePicker');
+const applyShapeBtn = document.getElementById('applyShapeBtn');
+const toggleEdgeRoutingBtn = document.getElementById('toggleEdgeRoutingBtn');
+const snapToGridInput = document.getElementById('snapToGridInput');
 let bubbleEditorState = { bubbleData: null, action: null };
 let voiceSettings = voiceSettingsModule?.loadSettings
   ? voiceSettingsModule.loadSettings()
@@ -431,6 +465,8 @@ function clearMapData() {
   activeBubble = null;
   pendingConnectionFrom = null;
   selectedBubble = null;
+  selectedEdge = null;
+  clearMultiSelection();
   playbackActive = false;
   playbackPaused = false;
   orderedPlayback = [];
@@ -676,10 +712,12 @@ function setBubbleType(data, newType) {
 
 function removeBubble(data, shouldSaveSnapshot = true) {
   if (data?.el?.parentNode) data.el.parentNode.removeChild(data.el);
+  multiSelection.delete(data);
   const index = bubbles.indexOf(data);
   if (index > -1) bubbles.splice(index, 1);
   for (let i = connections.length - 1; i >= 0; i--) {
     if (connections[i].from === data || connections[i].to === data) {
+      if (selectedEdge === connections[i]) selectedEdge = null;
       connections.splice(i, 1);
     }
   }
@@ -768,6 +806,7 @@ function applyBubbleEditorAction() {
       return;
     }
     bubbleData.textEl.textContent = titleCaseFirst(newText);
+    applyBubbleShape(bubbleData, bubbleData.shape || 'ellipse');
     updateSidebar();
     saveSnapshot();
     closeBubbleEditorModal();
@@ -1089,21 +1128,574 @@ const MIN_ZOOM = 0.001;
 const MAX_ZOOM = 64;
 let isPanning = false;
 let panStart = {}, camStart = {};
+let activeTool = 'select';
+let snapToGridEnabled = false;
+let marqueeSelecting = false;
+let marqueeStart = { x: 0, y: 0 };
+let selectedEdge = null;
+const multiSelection = new Set();
+let connectorDragState = null;
+const GRID_SIZE = 24;
+let clipboardSnapshot = null;
+let edgeRoutingMode = 'orthogonal';
+let activeSnapGuideX = null;
+let activeSnapGuideY = null;
+const snapGuideVerticalEl = document.createElement('div');
+const snapGuideHorizontalEl = document.createElement('div');
+snapGuideVerticalEl.className = 'snap-guide vertical hidden';
+snapGuideHorizontalEl.className = 'snap-guide horizontal hidden';
+document.body.appendChild(snapGuideVerticalEl);
+document.body.appendChild(snapGuideHorizontalEl);
+
+function setToolbarStatus(message) {
+  if (!toolbarStatusEl) return;
+  toolbarStatusEl.textContent = message;
+}
+
+function setActiveTool(tool) {
+  if (selectedBubble?.el) selectedBubble.el.style.outline = '';
+  activeTool = tool;
+  if (toolSelectBtn) toolSelectBtn.classList.toggle('active', tool === 'select');
+  if (toolPanBtn) toolPanBtn.classList.toggle('active', tool === 'pan');
+  if (toolConnectBtn) toolConnectBtn.classList.toggle('active', tool === 'connect');
+  selectedBubble = null;
+  const label = tool === 'pan' ? 'Pan tool active' : tool === 'connect' ? 'Connect tool active' : 'Select tool active';
+  setToolbarStatus(label);
+}
+
+function worldToScreen(x, y) {
+  return {
+    x: getSidebarWidth() + (x - camX) * zoom,
+    y: (y - camY) * zoom
+  };
+}
+
+function maybeSnap(value) {
+  if (!snapToGridEnabled) return value;
+  return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+function updateMultiSelectionVisuals() {
+  bubbles.forEach((bubbleData) => {
+    bubbleData.el.classList.toggle('multi-selected', multiSelection.has(bubbleData));
+  });
+}
+
+function clearMultiSelection() {
+  multiSelection.clear();
+  updateMultiSelectionVisuals();
+}
+
+function toggleBubbleInSelection(data, additive) {
+  if (!data) return;
+  if (!additive) clearMultiSelection();
+  if (multiSelection.has(data)) {
+    if (additive) multiSelection.delete(data);
+  } else {
+    multiSelection.add(data);
+  }
+  updateMultiSelectionVisuals();
+}
+
+function deleteSelection() {
+  if (multiSelection.size > 0) {
+    const nodes = Array.from(multiSelection);
+    clearMultiSelection();
+    nodes.forEach((node) => removeBubble(node, false));
+    saveSnapshot();
+    return;
+  }
+  if (selectedEdge) {
+    const idx = connections.indexOf(selectedEdge);
+    if (idx >= 0) {
+      connections.splice(idx, 1);
+      selectedEdge = null;
+      saveSnapshot();
+    }
+  }
+}
+
+function duplicateSelection() {
+  const selection = multiSelection.size > 0 ? Array.from(multiSelection) : activeBubble ? [activeBubble] : [];
+  if (!selection.length) return;
+
+  const cloneMap = new Map();
+  const created = [];
+  selection.forEach((item) => {
+    const clone = createBubble(
+      getBubbleDisplayText(item),
+      maybeSnap(item.x + 60),
+      maybeSnap(item.y + 60),
+      item.type || 'idea'
+    );
+    clone.locked = false;
+    clone.el.classList.remove('locked');
+    cloneMap.set(item, clone);
+    created.push(clone);
+  });
+
+  connections.forEach((conn) => {
+    if (cloneMap.has(conn.from) && cloneMap.has(conn.to)) {
+      addConnection(cloneMap.get(conn.from), cloneMap.get(conn.to), {
+        label: conn.label,
+        type: conn.type,
+        weight: conn.weight
+      });
+    }
+  });
+
+  clearMultiSelection();
+  created.forEach((node) => multiSelection.add(node));
+  updateMultiSelectionVisuals();
+  if (created[0]) makeBubbleActive(created[0]);
+  saveSnapshot();
+}
+
+function alignSelectionLeft() {
+  const selection = multiSelection.size > 0 ? Array.from(multiSelection) : activeBubble ? [activeBubble] : [];
+  if (selection.length < 2) return;
+  const left = Math.min(...selection.map((item) => item.x));
+  selection.forEach((item) => {
+    item.x = maybeSnap(left);
+    item.updatedAt = new Date().toISOString();
+  });
+  saveSnapshot();
+}
+
+function alignSelectionTop() {
+  const selection = multiSelection.size > 0 ? Array.from(multiSelection) : activeBubble ? [activeBubble] : [];
+  if (selection.length < 2) return;
+  const top = Math.min(...selection.map((item) => item.y));
+  selection.forEach((item) => {
+    item.y = maybeSnap(top);
+    item.updatedAt = new Date().toISOString();
+  });
+  saveSnapshot();
+}
+
+function distributeSelection(axis) {
+  const selection = multiSelection.size > 0 ? Array.from(multiSelection) : [];
+  if (selection.length < 3) return;
+  const items = selection
+    .slice()
+    .sort((a, b) => (axis === 'x' ? a.x - b.x : a.y - b.y));
+  const min = axis === 'x' ? items[0].x : items[0].y;
+  const max = axis === 'x' ? items[items.length - 1].x : items[items.length - 1].y;
+  const span = max - min;
+  if (span <= 0) return;
+  const step = span / (items.length - 1);
+  items.forEach((item, index) => {
+    if (axis === 'x') item.x = maybeSnap(min + step * index);
+    else item.y = maybeSnap(min + step * index);
+    item.updatedAt = new Date().toISOString();
+  });
+  saveSnapshot();
+}
+
+function nudgeSelection(dx, dy) {
+  const selection = multiSelection.size > 0 ? Array.from(multiSelection) : activeBubble ? [activeBubble] : [];
+  if (!selection.length) return;
+  selection.forEach((item) => {
+    item.x = maybeSnap(item.x + dx);
+    item.y = maybeSnap(item.y + dy);
+    item.updatedAt = new Date().toISOString();
+  });
+  saveSnapshot();
+}
+
+function getSelectionNodes() {
+  if (multiSelection.size > 0) return Array.from(multiSelection);
+  if (activeBubble) return [activeBubble];
+  return [];
+}
+
+function ensureBubbleDimensions(data) {
+  if (!Number.isFinite(data.width) || data.width <= 0) {
+    data.width = Math.max(data.el.offsetWidth || 180, 120);
+  }
+  if (!Number.isFinite(data.height) || data.height <= 0) {
+    data.height = Math.max(data.el.offsetHeight || 90, 70);
+  }
+}
+
+function getShapeSizeBounds(shape) {
+  if (shape === 'swimlane') return { minW: 320, minH: 140 };
+  if (shape === 'frame') return { minW: 320, minH: 200 };
+  return { minW: 90, minH: 60 };
+}
+
+function applyBubbleShape(data, shape) {
+  const nextShape = String(shape || 'ellipse');
+  data.shape = nextShape;
+  data.el.classList.remove('shape-ellipse', 'shape-rect', 'shape-rounded', 'shape-diamond', 'shape-speech', 'shape-swimlane', 'shape-frame');
+  data.el.classList.add(`shape-${nextShape}`);
+  if (nextShape === 'swimlane' || nextShape === 'frame') {
+    data.el.dataset.title = getBubbleDisplayText(data);
+    data.el.style.zIndex = '120';
+  } else {
+    delete data.el.dataset.title;
+    data.el.style.zIndex = '';
+  }
+}
+
+function applyBubbleSize(data) {
+  ensureBubbleDimensions(data);
+  data.el.style.width = `${data.width}px`;
+  data.el.style.height = `${data.height}px`;
+}
+
+function applyShapeToSelection(shape) {
+  const nodes = getSelectionNodes();
+  if (!nodes.length) return;
+  nodes.forEach((node) => {
+    applyBubbleShape(node, shape);
+    const bounds = getShapeSizeBounds(node.shape);
+    node.width = Math.max(node.width || 0, bounds.minW);
+    node.height = Math.max(node.height || 0, bounds.minH);
+    applyBubbleSize(node);
+  });
+  saveSnapshot();
+}
+
+function toSerializableSelection(selection) {
+  const nodeSet = new Set(selection);
+  const nodes = selection.map((node) => ({
+    text: getBubbleDisplayText(node),
+    x: node.x,
+    y: node.y,
+    type: node.type,
+    notes: node.notes || '',
+    tags: Array.isArray(node.tags) ? node.tags : [],
+    priority: Number.isFinite(node.priority) ? node.priority : 0,
+    colorOverride: node.colorOverride || null,
+    dueDate: node.dueDate || null,
+    metadata: node.metadata && typeof node.metadata === 'object' ? node.metadata : {},
+    aiSummary: node.aiSummary || '',
+    voiceNote: node.voiceNote || '',
+    shape: node.shape || 'ellipse',
+    width: node.width || node.el.offsetWidth || 180,
+    height: node.height || node.el.offsetHeight || 90,
+    groupId: node.groupId || null
+  }));
+
+  const edges = connections
+    .filter((conn) => nodeSet.has(conn.from) && nodeSet.has(conn.to))
+    .map((conn) => ({
+      from: selection.indexOf(conn.from),
+      to: selection.indexOf(conn.to),
+      label: conn.label || '',
+      type: conn.type || 'sequence',
+      weight: Number.isFinite(conn.weight) ? conn.weight : 1,
+      metadata: conn.metadata && typeof conn.metadata === 'object' ? conn.metadata : {}
+    }));
+
+  return { nodes, edges };
+}
+
+function copySelectionToClipboard() {
+  const selection = getSelectionNodes();
+  if (!selection.length) return;
+  clipboardSnapshot = toSerializableSelection(selection);
+  setToolbarStatus(`Copied ${clipboardSnapshot.nodes.length} node(s)`);
+}
+
+function cutSelectionToClipboard() {
+  copySelectionToClipboard();
+  deleteSelection();
+}
+
+function pasteClipboard() {
+  if (!clipboardSnapshot?.nodes?.length) return;
+  const offset = 48;
+  const created = [];
+  clipboardSnapshot.nodes.forEach((node) => {
+    const createdNode = createBubble(
+      node.text,
+      maybeSnap(node.x + offset),
+      maybeSnap(node.y + offset),
+      node.type || 'idea'
+    );
+    createdNode.notes = node.notes;
+    createdNode.tags = node.tags;
+    createdNode.priority = node.priority;
+    createdNode.colorOverride = node.colorOverride;
+    createdNode.dueDate = node.dueDate;
+    createdNode.metadata = node.metadata;
+    createdNode.aiSummary = node.aiSummary;
+    createdNode.voiceNote = node.voiceNote;
+    createdNode.groupId = node.groupId;
+    createdNode.width = node.width;
+    createdNode.height = node.height;
+    applyBubbleSize(createdNode);
+    applyBubbleShape(createdNode, node.shape || 'ellipse');
+    applyBubbleVisualState(createdNode);
+    created.push(createdNode);
+  });
+  clipboardSnapshot.edges.forEach((edge) => {
+    const from = created[edge.from];
+    const to = created[edge.to];
+    if (!from || !to) return;
+    addConnection(from, to, {
+      label: edge.label,
+      type: edge.type,
+      weight: edge.weight,
+      metadata: edge.metadata
+    });
+  });
+  clearMultiSelection();
+  created.forEach((node) => multiSelection.add(node));
+  updateMultiSelectionVisuals();
+  if (created[0]) makeBubbleActive(created[0]);
+  saveSnapshot();
+}
+
+function groupSelection() {
+  const nodes = getSelectionNodes();
+  if (nodes.length < 2) return;
+  const groupId = `group_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  nodes.forEach((node) => { node.groupId = groupId; });
+  setToolbarStatus(`Grouped ${nodes.length} node(s)`);
+  saveSnapshot();
+}
+
+function ungroupSelection() {
+  const nodes = getSelectionNodes();
+  if (!nodes.length) return;
+  nodes.forEach((node) => { node.groupId = null; });
+  saveSnapshot();
+}
+
+function createFrameFromSelection() {
+  const nodes = getSelectionNodes();
+  if (!nodes.length) return;
+  const minX = Math.min(...nodes.map((node) => node.x));
+  const minY = Math.min(...nodes.map((node) => node.y));
+  const maxX = Math.max(...nodes.map((node) => node.x + (node.width || node.el.offsetWidth || 180)));
+  const maxY = Math.max(...nodes.map((node) => node.y + (node.height || node.el.offsetHeight || 90)));
+  const padding = 40;
+  const frame = createBubble('Frame', minX - padding, minY - padding, 'note');
+  frame.width = Math.max(340, maxX - minX + padding * 2);
+  frame.height = Math.max(240, maxY - minY + padding * 2);
+  applyBubbleSize(frame);
+  applyBubbleShape(frame, 'frame');
+  const frameId = frame.id;
+  nodes.forEach((node) => {
+    const metadata = node.metadata && typeof node.metadata === 'object' ? node.metadata : {};
+    node.metadata = { ...metadata, frameId };
+  });
+  clearMultiSelection();
+  multiSelection.add(frame);
+  updateMultiSelectionVisuals();
+  makeBubbleActive(frame);
+  saveSnapshot();
+}
+
+function clearSnapGuides() {
+  activeSnapGuideX = null;
+  activeSnapGuideY = null;
+  snapGuideVerticalEl.classList.add('hidden');
+  snapGuideHorizontalEl.classList.add('hidden');
+}
+
+function updateSnapGuidePosition() {
+  if (activeSnapGuideX === null) {
+    snapGuideVerticalEl.classList.add('hidden');
+  } else {
+    snapGuideVerticalEl.classList.remove('hidden');
+    snapGuideVerticalEl.style.left = `${getSidebarWidth() + (activeSnapGuideX - camX) * zoom}px`;
+  }
+  if (activeSnapGuideY === null) {
+    snapGuideHorizontalEl.classList.add('hidden');
+  } else {
+    snapGuideHorizontalEl.classList.remove('hidden');
+    snapGuideHorizontalEl.style.top = `${(activeSnapGuideY - camY) * zoom}px`;
+  }
+}
+
+function getSnapCandidates(currentNode) {
+  const others = bubbles.filter((item) => item !== currentNode);
+  return {
+    x: others.map((item) => item.x),
+    y: others.map((item) => item.y)
+  };
+}
+
+function applyGuidedSnap(node, nextX, nextY) {
+  const threshold = 8 / Math.max(zoom, 0.01);
+  const candidates = getSnapCandidates(node);
+  let snappedX = nextX;
+  let snappedY = nextY;
+  activeSnapGuideX = null;
+  activeSnapGuideY = null;
+
+  candidates.x.forEach((candidate) => {
+    if (Math.abs(candidate - nextX) <= threshold && activeSnapGuideX === null) {
+      snappedX = candidate;
+      activeSnapGuideX = candidate;
+    }
+  });
+  candidates.y.forEach((candidate) => {
+    if (Math.abs(candidate - nextY) <= threshold && activeSnapGuideY === null) {
+      snappedY = candidate;
+      activeSnapGuideY = candidate;
+    }
+  });
+  updateSnapGuidePosition();
+  return { x: snappedX, y: snappedY };
+}
+
+function updateMarquee(clientX, clientY) {
+  if (!selectionMarqueeEl) return;
+  const left = Math.min(clientX, marqueeStart.x);
+  const top = Math.min(clientY, marqueeStart.y);
+  const width = Math.abs(clientX - marqueeStart.x);
+  const height = Math.abs(clientY - marqueeStart.y);
+  selectionMarqueeEl.style.left = `${left}px`;
+  selectionMarqueeEl.style.top = `${top}px`;
+  selectionMarqueeEl.style.width = `${width}px`;
+  selectionMarqueeEl.style.height = `${height}px`;
+}
+
+function finishMarqueeSelection(clientX, clientY, additive) {
+  if (!marqueeSelecting) return;
+  marqueeSelecting = false;
+  if (selectionMarqueeEl) selectionMarqueeEl.classList.add('hidden');
+  const minX = Math.min(clientX, marqueeStart.x);
+  const maxX = Math.max(clientX, marqueeStart.x);
+  const minY = Math.min(clientY, marqueeStart.y);
+  const maxY = Math.max(clientY, marqueeStart.y);
+  const selected = bubbles.filter((bubbleData) => {
+    const pt = worldToScreen(bubbleData.x, bubbleData.y);
+    return pt.x >= minX && pt.x <= maxX && pt.y >= minY && pt.y <= maxY;
+  });
+  if (!additive) clearMultiSelection();
+  selected.forEach((item) => multiSelection.add(item));
+  updateMultiSelectionVisuals();
+}
+
+function createConnectorsForBubble(bubble, data) {
+  ['top', 'right', 'bottom', 'left'].forEach((direction) => {
+    const handle = document.createElement('div');
+    handle.className = `bubble-connector ${direction}`;
+    handle.dataset.direction = direction;
+    handle.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.stopPropagation();
+      event.preventDefault();
+      connectorDragState = {
+        from: data,
+        startX: event.clientX,
+        startY: event.clientY,
+        currentX: event.clientX,
+        currentY: event.clientY
+      };
+      setToolbarStatus('Drag to another node to connect');
+      setActiveTool('connect');
+    });
+    bubble.appendChild(handle);
+  });
+}
+
+function createResizeHandlesForBubble(bubble, data) {
+  ['se', 'e', 's'].forEach((direction) => {
+    const handle = document.createElement('div');
+    handle.className = `bubble-resize-handle ${direction}`;
+    handle.dataset.direction = direction;
+    handle.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      event.stopPropagation();
+      event.preventDefault();
+      ensureBubbleDimensions(data);
+      const start = {
+        x: event.clientX,
+        y: event.clientY,
+        width: data.width,
+        height: data.height
+      };
+
+      function onMove(moveEvent) {
+        const dx = (moveEvent.clientX - start.x) / Math.max(zoom, 0.01);
+        const dy = (moveEvent.clientY - start.y) / Math.max(zoom, 0.01);
+        const nextShape = data.shape || 'ellipse';
+        const bounds = getShapeSizeBounds(nextShape);
+        if (direction === 'se' || direction === 'e') {
+          data.width = Math.max(bounds.minW, maybeSnap(start.width + dx));
+        }
+        if (direction === 'se' || direction === 's') {
+          data.height = Math.max(bounds.minH, maybeSnap(start.height + dy));
+        }
+        applyBubbleSize(data);
+      }
+
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        saveSnapshot();
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    bubble.appendChild(handle);
+  });
+}
+
+function getBubbleAtPoint(clientX, clientY) {
+  const element = document.elementFromPoint(clientX, clientY);
+  if (!element) return null;
+  const bubbleEl = element.closest('.bubble');
+  if (!bubbleEl) return null;
+  return bubbles.find((item) => item.el === bubbleEl) || null;
+}
 
 
 
 window.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   if (e.target.closest('#sidebar')) return;
+  if (e.target.closest('.bubble-connector')) return;
+  const canPan = activeTool === 'pan';
+  if (activeTool === 'select' && !e.target.closest('.bubble')) {
+    marqueeSelecting = true;
+    marqueeStart = { x: e.clientX, y: e.clientY };
+    updateMarquee(e.clientX, e.clientY);
+    if (selectionMarqueeEl) selectionMarqueeEl.classList.remove('hidden');
+    return;
+  }
   if (e.target.closest('.bubble')) return;
+  if (!canPan) return;
   isAutoPanning = false; // interrupt auto-pan
   isPanning = true;
   panStart = { x: e.clientX, y: e.clientY };
   camStart = { x: camX, y: camY };
 });
 
-window.addEventListener('mouseup', () => isPanning = false);
+window.addEventListener('mouseup', (e) => {
+  isPanning = false;
+  clearSnapGuides();
+  if (marqueeSelecting) {
+    finishMarqueeSelection(e.clientX, e.clientY, e.shiftKey || e.metaKey || e.ctrlKey);
+  }
+  if (connectorDragState) {
+    const target = getBubbleAtPoint(e.clientX, e.clientY);
+    if (target && target !== connectorDragState.from) {
+      addConnection(connectorDragState.from, target, { label: '', type: 'sequence' });
+      saveSnapshot();
+    }
+    connectorDragState = null;
+    setToolbarStatus(activeTool === 'connect' ? 'Connect tool active' : 'Select tool active');
+  }
+});
 window.addEventListener('mousemove', (e) => {
+  if (marqueeSelecting) {
+    updateMarquee(e.clientX, e.clientY);
+    return;
+  }
+  if (connectorDragState) {
+    connectorDragState.currentX = e.clientX;
+    connectorDragState.currentY = e.clientY;
+    return;
+  }
   if (!isPanning) return;
   const dx = (e.clientX - panStart.x) / zoom;
   const dy = (e.clientY - panStart.y) / zoom;
@@ -1239,6 +1831,10 @@ function createBubbleFromVoiceTranscript(rawTranscript) {
     metadata: normalizedNode.metadata,
     aiSummary: normalizedNode.aiSummary,
     voiceNote: normalizedNode.voiceNote,
+    shape: normalizedNode.shape || 'ellipse',
+    width: Number.isFinite(normalizedNode.width) ? normalizedNode.width : 180,
+    height: Number.isFinite(normalizedNode.height) ? normalizedNode.height : 90,
+    groupId: normalizedNode.groupId || null,
     createdAt: normalizedNode.createdAt,
     updatedAt: normalizedNode.updatedAt
   };
@@ -1259,18 +1855,10 @@ function createBubbleFromVoiceTranscript(rawTranscript) {
   bubble.style.opacity = 0;
   document.body.appendChild(bubble);
   attachBubbleDblClickHandler(bubble, data);
-
-  bubble.addEventListener('click', () => {
-    if (!isConnectMode) return;
-    if (!selectedBubble) {
-      selectedBubble = data;
-      bubble.style.outline = '2px solid yellow';
-      return;
-    }
-    addConnection(selectedBubble, data, { label: '' });
-    selectedBubble.el.style.outline = '';
-    selectedBubble = null;
-  });
+  createConnectorsForBubble(bubble, data);
+  createResizeHandlesForBubble(bubble, data);
+  applyBubbleSize(data);
+  applyBubbleShape(data, data.shape);
 
   enableDragging(bubble, data);
   enableBubbleInteractions(bubble, data);
@@ -1304,6 +1892,8 @@ function selectBubbleByIndex(targetIndex) {
 function setConnectModeFromVoice(enabled) {
   isConnectMode = !!enabled;
   selectedBubble = null;
+  if (enabled) setActiveTool('connect');
+  else if (activeTool === 'connect') setActiveTool('select');
   updateVoiceTranscriptDisplay(`Connect mode ${isConnectMode ? 'enabled' : 'disabled'}.`);
 }
 
@@ -1595,6 +2185,44 @@ let playbackIndex = 0;
 let orderedPlayback = [];
 
 applyResponsiveSidebarDefault(true);
+setActiveTool('select');
+
+if (toolSelectBtn) toolSelectBtn.addEventListener('click', () => setActiveTool('select'));
+if (toolPanBtn) toolPanBtn.addEventListener('click', () => setActiveTool('pan'));
+if (toolConnectBtn) toolConnectBtn.addEventListener('click', () => setActiveTool('connect'));
+if (duplicateSelectionBtn) duplicateSelectionBtn.addEventListener('click', duplicateSelection);
+if (deleteSelectionBtn) deleteSelectionBtn.addEventListener('click', deleteSelection);
+if (copySelectionBtn) copySelectionBtn.addEventListener('click', copySelectionToClipboard);
+if (cutSelectionBtn) cutSelectionBtn.addEventListener('click', cutSelectionToClipboard);
+if (pasteSelectionBtn) pasteSelectionBtn.addEventListener('click', pasteClipboard);
+if (undoBtn) undoBtn.addEventListener('click', undo);
+if (redoBtn) redoBtn.addEventListener('click', redo);
+if (alignLeftBtn) alignLeftBtn.addEventListener('click', alignSelectionLeft);
+if (alignTopBtn) alignTopBtn.addEventListener('click', alignSelectionTop);
+if (distributeHorizontalBtn) distributeHorizontalBtn.addEventListener('click', () => distributeSelection('x'));
+if (distributeVerticalBtn) distributeVerticalBtn.addEventListener('click', () => distributeSelection('y'));
+if (groupSelectionBtn) groupSelectionBtn.addEventListener('click', groupSelection);
+if (ungroupSelectionBtn) ungroupSelectionBtn.addEventListener('click', ungroupSelection);
+if (frameSelectionBtn) frameSelectionBtn.addEventListener('click', createFrameFromSelection);
+if (applyShapeBtn && shapePicker) {
+  applyShapeBtn.addEventListener('click', () => applyShapeToSelection(shapePicker.value));
+}
+if (toggleEdgeRoutingBtn) {
+  toggleEdgeRoutingBtn.addEventListener('click', () => {
+    edgeRoutingMode = edgeRoutingMode === 'orthogonal' ? 'bezier' : 'orthogonal';
+    const labelEl = toggleEdgeRoutingBtn.querySelector('.btn-label');
+    const nextLabel = `Orthogonal: ${edgeRoutingMode === 'orthogonal' ? 'On' : 'Off'}`;
+    if (labelEl) labelEl.textContent = nextLabel;
+    else toggleEdgeRoutingBtn.textContent = nextLabel;
+    setToolbarStatus(edgeRoutingMode === 'orthogonal' ? 'Orthogonal routing enabled' : 'Bezier routing enabled');
+  });
+}
+if (snapToGridInput) {
+  snapToGridInput.addEventListener('change', () => {
+    snapToGridEnabled = !!snapToGridInput.checked;
+    setToolbarStatus(snapToGridEnabled ? 'Snap to grid enabled' : 'Snap to grid disabled');
+  });
+}
 
 function startPlayback() {
   if (!bubbles.length) return;
@@ -1728,17 +2356,90 @@ function panToTarget(x, y, duration = 600) {
 
 const clickLayer = document.getElementById('clickLayer');
 const clickCtx = clickLayer.getContext('2d');
+let draggingEdgeBend = null;
+
+function getEdgeRoutingMode(conn) {
+  const mode = conn?.metadata?.routingMode;
+  if (mode === 'bezier' || mode === 'orthogonal') return mode;
+  return edgeRoutingMode;
+}
+
+function ensureEdgeMetadata(conn) {
+  if (!conn.metadata || typeof conn.metadata !== 'object') conn.metadata = {};
+  return conn.metadata;
+}
+
+function getEdgeBend(conn, fromX, fromY, toX, toY) {
+  const metadata = ensureEdgeMetadata(conn);
+  if (!Number.isFinite(metadata.bendX)) metadata.bendX = (fromX + toX) / 2;
+  if (!Number.isFinite(metadata.bendY)) metadata.bendY = (fromY + toY) / 2;
+  return { bendX: metadata.bendX, bendY: metadata.bendY };
+}
+
+function drawOrthogonalEdge(conn, fromX, fromY, toX, toY, drawContext) {
+  const { bendX, bendY } = getEdgeBend(conn, fromX, fromY, toX, toY);
+  const metadata = ensureEdgeMetadata(conn);
+  const orientation = metadata.orientation === 'horizontal' ? 'horizontal' : 'vertical';
+  drawContext.beginPath();
+  drawContext.moveTo(fromX, fromY);
+  if (orientation === 'vertical') {
+    drawContext.lineTo(bendX, fromY);
+    drawContext.lineTo(bendX, toY);
+  } else {
+    drawContext.lineTo(fromX, bendY);
+    drawContext.lineTo(toX, bendY);
+  }
+  drawContext.lineTo(toX, toY);
+  drawContext.stroke();
+  return { bendX, bendY, orientation };
+}
+
+clickLayer.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  const rect = clickLayer.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  for (const conn of connections) {
+    if (!(conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y))) continue;
+    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
+    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
+    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
+    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
+    const { bendX, bendY, orientation } = getEdgeBend(conn, fromX, fromY, toX, toY);
+    const distSq = (x - bendX) ** 2 + (y - bendY) ** 2;
+    if (getEdgeRoutingMode(conn) === 'orthogonal' && distSq <= 121) {
+      draggingEdgeBend = { conn, orientation };
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    break;
+  }
+});
 
 clickLayer.addEventListener('click', e => {
   const rect = clickLayer.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
+  selectedEdge = null;
+  for (const conn of connections) {
+    if (conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y)) {
+      selectedEdge = conn;
+      setToolbarStatus(`Selected edge: ${conn.label || '(unlabeled)'}`);
+      break;
+    }
+  }
+});
 
+clickLayer.addEventListener('dblclick', (e) => {
+  const rect = clickLayer.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
   for (const conn of connections) {
     if (conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y)) {
       const newLabel = prompt("Label this connection:", conn.label || '');
       if (newLabel !== null) {
         conn.label = newLabel;
+        selectedEdge = conn;
         saveSnapshot();
       }
       break;
@@ -1746,122 +2447,187 @@ clickLayer.addEventListener('click', e => {
   }
 });
 
+window.addEventListener('mousemove', (event) => {
+  if (!draggingEdgeBend) return;
+  const conn = draggingEdgeBend.conn;
+  const metadata = ensureEdgeMetadata(conn);
+  if (draggingEdgeBend.orientation === 'vertical') {
+    metadata.bendX = event.clientX - getSidebarWidth();
+  } else {
+    metadata.bendY = event.clientY;
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  if (!draggingEdgeBend) return;
+  draggingEdgeBend = null;
+  saveSnapshot();
+});
+
 
 
 function animate() {
-const surface = getWorkspaceSurfaceSize();
+  const surface = getWorkspaceSurfaceSize();
 
-canvas.width = surface.width;
-canvas.height = surface.height;
-canvas.style.left = `${getSidebarWidth()}px`;
-canvas.style.top = '0px';
-canvas.style.width = `${surface.width}px`;
-canvas.style.height = `${surface.height}px`;
+  canvas.width = surface.width;
+  canvas.height = surface.height;
+  canvas.style.left = `${getSidebarWidth()}px`;
+  canvas.style.top = '0px';
+  canvas.style.width = `${surface.width}px`;
+  canvas.style.height = `${surface.height}px`;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  ctx.strokeStyle = 'rgba(0,0,0)';
   ctx.lineWidth = 3;
-  connections.forEach(conn => {
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = 'black';
+  ctx.textAlign = 'center';
+
+  connections.forEach((conn) => {
     if (!conn.from.visible || !conn.to.visible) return;
-
-    let fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
-    let fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
-    let toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
-    let toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
-
+    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
+    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
+    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
+    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
     const midX1 = fromX + (toX - fromX) * 0.25;
     const midY1 = fromY - 50 * zoom;
     const midX2 = toX - (toX - fromX) * 0.25;
     const midY2 = toY - 50 * zoom;
 
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.bezierCurveTo(midX1, midY1, midX2, midY2, toX, toY);
-    ctx.stroke();
-    ctx.font = '14px sans-serif';
-ctx.fillStyle = 'black';
-ctx.textAlign = 'center';
+    ctx.strokeStyle = conn === selectedEdge ? '#f24e1e' : 'rgba(0,0,0,1)';
+    if (getEdgeRoutingMode(conn) === 'orthogonal') {
+      const bend = drawOrthogonalEdge(conn, fromX, fromY, toX, toY, ctx);
+      if (conn === selectedEdge) {
+        ctx.fillStyle = '#f24e1e';
+        ctx.beginPath();
+        ctx.arc(bend.bendX, bend.bendY, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'black';
+      }
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.bezierCurveTo(midX1, midY1, midX2, midY2, toX, toY);
+      ctx.stroke();
+    }
 
-connections.forEach(conn => {
-  if (!conn.from.visible || !conn.to.visible) return;
-
-  let fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
-  let fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
-  let toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
-  let toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
-
-  const midX = (fromX + toX) / 2;
-  const midY = (fromY + toY) / 2 - 10 * zoom;
-
-  ctx.fillText(conn.label || '', midX, midY);
-});
-
+    const midX = (fromX + toX) / 2;
+    const midY = (fromY + toY) / 2 - 10 * zoom;
+    ctx.fillText(conn.label || '', midX, midY);
   });
 
-clickLayer.width = surface.width;
-clickLayer.height = surface.height;
-clickLayer.style.left = `${getSidebarWidth()}px`;
-clickLayer.style.top = '0px';
-clickLayer.style.width = `${surface.width}px`;
-clickLayer.style.height = `${surface.height}px`;
+  if (connectorDragState) {
+    const fromX = (connectorDragState.from.x - camX) * zoom + connectorDragState.from.el.offsetWidth / 2;
+    const fromY = (connectorDragState.from.y - camY) * zoom + connectorDragState.from.el.offsetHeight / 2;
+    const toX = connectorDragState.currentX - getSidebarWidth();
+    const toY = connectorDragState.currentY;
+    ctx.strokeStyle = '#f24e1e';
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(toX, toY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
-document.body.style.minWidth = `${getSidebarWidth() + surface.width}px`;
-document.body.style.minHeight = `${surface.height}px`;
+  clickLayer.width = surface.width;
+  clickLayer.height = surface.height;
+  clickLayer.style.left = `${getSidebarWidth()}px`;
+  clickLayer.style.top = '0px';
+  clickLayer.style.width = `${surface.width}px`;
+  clickLayer.style.height = `${surface.height}px`;
 
-clickCtx.clearRect(0, 0, clickLayer.width, clickLayer.height);
-clickCtx.lineWidth = 10;
-clickCtx.strokeStyle = 'rgba(0,0,0,0)'; // invisible but clickable
+  document.body.style.minWidth = `${getSidebarWidth() + surface.width}px`;
+  document.body.style.minHeight = `${surface.height}px`;
 
-connections.forEach((conn, i) => {
-  if (!conn.from.visible || !conn.to.visible) return;
+  clickCtx.clearRect(0, 0, clickLayer.width, clickLayer.height);
+  clickCtx.lineWidth = 10;
+  clickCtx.strokeStyle = 'rgba(0,0,0,0)';
 
-  let fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
-  let fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
-  let toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
-  let toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
+  connections.forEach((conn) => {
+    if (!conn.from.visible || !conn.to.visible) return;
+    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
+    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
+    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
+    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
+    const midX1 = fromX + (toX - fromX) * 0.25;
+    const midY1 = fromY - 50 * zoom;
+    const midX2 = toX - (toX - fromX) * 0.25;
+    const midY2 = toY - 50 * zoom;
 
-  const midX1 = fromX + (toX - fromX) * 0.25;
-  const midY1 = fromY - 50 * zoom;
-  const midX2 = toX - (toX - fromX) * 0.25;
-  const midY2 = toY - 50 * zoom;
+    conn._clickPath = new Path2D();
+    if (getEdgeRoutingMode(conn) === 'orthogonal') {
+      const { bendX, bendY, orientation } = getEdgeBend(conn, fromX, fromY, toX, toY);
+      conn._clickPath.moveTo(fromX, fromY);
+      if (orientation === 'vertical') {
+        conn._clickPath.lineTo(bendX, fromY);
+        conn._clickPath.lineTo(bendX, toY);
+      } else {
+        conn._clickPath.lineTo(fromX, bendY);
+        conn._clickPath.lineTo(toX, bendY);
+      }
+      conn._clickPath.lineTo(toX, toY);
+      clickCtx.stroke(conn._clickPath);
+    } else {
+      conn._clickPath.moveTo(fromX, fromY);
+      conn._clickPath.bezierCurveTo(midX1, midY1, midX2, midY2, toX, toY);
+      clickCtx.stroke(conn._clickPath);
+    }
+  });
 
-  clickCtx.beginPath();
-  clickCtx.moveTo(fromX, fromY);
-  clickCtx.bezierCurveTo(midX1, midY1, midX2, midY2, toX, toY);
-  clickCtx.stroke();
-
-  conn._clickPath = new Path2D();
-  conn._clickPath.moveTo(fromX, fromY);
-  conn._clickPath.bezierCurveTo(midX1, midY1, midX2, midY2, toX, toY);
-});
-
-
-  bubbles.forEach(b => {
+  bubbles.forEach((b) => {
     if (!b.visible) return;
     b.el.style.left = `${getSidebarWidth() + (b.x - camX) * zoom}px`;
     b.el.style.top = `${(b.y - camY) * zoom}px`;
-    b.el.style.transform = `scale(${zoom})`;
+    const rotate = b.shape === 'diamond' ? ' rotate(45deg)' : '';
+    b.el.style.transform = `scale(${zoom})${rotate}`;
   });
+  updateSnapGuidePosition();
   requestAnimationFrame(animate);
 }
 
 function enableDragging(el, data) {
-  let isDragging = false, offsetX = 0, offsetY = 0;
+  let isDragging = false;
+  let groupOffsets = [];
   let activeTouchId = null;
 
   function startDrag(clientX, clientY) {
+    if (activeTool === 'pan') return;
     isDragging = true;
     data.dragging = true;
-    offsetX = screenToWorldX(clientX) - data.x;
-    offsetY = clientY / zoom - data.y + camY;
+    const groupedTargets = data.groupId
+      ? bubbles.filter((item) => item.groupId === data.groupId)
+      : [data];
+    const targets = multiSelection.has(data)
+      ? Array.from(multiSelection)
+      : groupedTargets;
+    const leadX = data.x;
+    const leadY = data.y;
+    groupOffsets = targets.map((node) => ({
+      node,
+      offsetX: screenToWorldX(clientX) - node.x,
+      offsetY: clientY / zoom - node.y + camY,
+      deltaXFromLead: node.x - leadX,
+      deltaYFromLead: node.y - leadY
+    }));
   }
 
   function moveDrag(clientX, clientY) {
-    data.x = screenToWorldX(clientX) - offsetX;
-    data.y = (clientY / zoom - offsetY) + camY;
-    clampBubbleToWorkspace(data);
-    data.updatedAt = new Date().toISOString();
+    groupOffsets.forEach((entry) => {
+      let nextX = maybeSnap(screenToWorldX(clientX) - entry.offsetX);
+      let nextY = maybeSnap((clientY / zoom - entry.offsetY) + camY);
+      if (entry.node === data) {
+        const snapped = applyGuidedSnap(entry.node, nextX, nextY);
+        nextX = snapped.x;
+        nextY = snapped.y;
+      } else if (activeSnapGuideX !== null || activeSnapGuideY !== null) {
+        if (activeSnapGuideX !== null) nextX = activeSnapGuideX + entry.deltaXFromLead;
+        if (activeSnapGuideY !== null) nextY = activeSnapGuideY + entry.deltaYFromLead;
+      }
+      entry.node.x = nextX;
+      entry.node.y = nextY;
+      clampBubbleToWorkspace(entry.node);
+      entry.node.updatedAt = new Date().toISOString();
+    });
   }
 
   function finishDrag() {
@@ -1871,12 +2637,14 @@ function enableDragging(el, data) {
     activeTouchId = null;
     resolveBubbleCollision(data);
     data.updatedAt = new Date().toISOString();
+    clearSnapGuides();
     saveSnapshot();
   }
 
   el.addEventListener('mousedown', e => {
     if (data.locked) return;
     if (e.button !== 0) return;
+    if (e.target.closest('.bubble-connector')) return;
     startDrag(e.clientX, e.clientY);
   });
 
@@ -1965,6 +2733,10 @@ function getStateSnapshot() {
       metadata: b.metadata && typeof b.metadata === 'object' ? b.metadata : {},
       aiSummary: b.aiSummary || '',
       voiceNote: b.voiceNote || '',
+      shape: b.shape || 'ellipse',
+      width: Number.isFinite(b.width) ? b.width : b.el.offsetWidth,
+      height: Number.isFinite(b.height) ? b.height : b.el.offsetHeight,
+      groupId: b.groupId || null,
       createdAt: b.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString()
     })),
@@ -1993,6 +2765,8 @@ function restoreStateFromSnapshot(snapshot) {
   document.querySelectorAll('.bubble').forEach(b => b.remove());
   bubbles.length = 0;
   connections.length = 0;
+  selectedEdge = null;
+  clearMultiSelection();
 
   state.bubbles.forEach(b => {
     const bubble = document.createElement('div');
@@ -2021,6 +2795,10 @@ function restoreStateFromSnapshot(snapshot) {
       metadata: normalizedNode.metadata,
       aiSummary: normalizedNode.aiSummary,
       voiceNote: normalizedNode.voiceNote,
+      shape: b.shape || 'ellipse',
+      width: Number.isFinite(b.width) ? b.width : 180,
+      height: Number.isFinite(b.height) ? b.height : 90,
+      groupId: b.groupId || null,
       createdAt: normalizedNode.createdAt,
       updatedAt: normalizedNode.updatedAt
     };
@@ -2048,22 +2826,10 @@ data.idLabel = idLabel;
 
 attachBubbleDblClickHandler(bubble, data);
 updateSidebar();
-
-
-    bubble.addEventListener('click', () => {
-      if (isConnectMode) {
-        if (!selectedBubble) {
-          selectedBubble = data;
-          bubble.style.outline = '2px solid yellow';
-        } else {
-          addConnection(selectedBubble, data, { label: '' });
-
-          selectedBubble.el.style.outline = '';
-          selectedBubble = null;
-          saveSnapshot();
-        }
-      }
-    });
+    createConnectorsForBubble(bubble, data);
+    createResizeHandlesForBubble(bubble, data);
+    applyBubbleSize(data);
+    applyBubbleShape(data, data.shape);
 
     enableDragging(bubble, data);
     enableBubbleInteractions(bubble, data);
@@ -2144,12 +2910,75 @@ window.addEventListener('keydown', (e) => {
     closePromptModal();
     return;
   }
+  if (isEditableTarget(e.target)) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+    e.preventDefault();
+    copySelectionToClipboard();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x') {
+    e.preventDefault();
+    cutSelectionToClipboard();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+    e.preventDefault();
+    pasteClipboard();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
+    e.preventDefault();
+    ungroupSelection();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+    e.preventDefault();
+    groupSelection();
+    return;
+  }
+  if (e.key.toLowerCase() === 'v') {
+    setActiveTool('select');
+    return;
+  }
+  if (e.key.toLowerCase() === 'h') {
+    setActiveTool('pan');
+    return;
+  }
+  if (e.key.toLowerCase() === 'c') {
+    setActiveTool('connect');
+    return;
+  }
   if (e.ctrlKey && e.key === 'z') {
     e.preventDefault();
     undo();
   } else if (e.ctrlKey && e.key === 'y') {
     e.preventDefault();
     redo();
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+    e.preventDefault();
+    duplicateSelection();
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    deleteSelection();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    nudgeSelection(0, e.shiftKey ? -20 : -5);
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    nudgeSelection(0, e.shiftKey ? 20 : 5);
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    nudgeSelection(e.shiftKey ? -20 : -5, 0);
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    nudgeSelection(e.shiftKey ? 20 : 5, 0);
+  } else if (e.key === 'Enter' && selectedEdge) {
+    e.preventDefault();
+    const newLabel = prompt("Label this connection:", selectedEdge.label || '');
+    if (newLabel !== null) {
+      selectedEdge.label = newLabel;
+      saveSnapshot();
+    }
   }
 });
 
@@ -2219,6 +3048,8 @@ function makeBubbleActive(data) {
   if (activeBubble) activeBubble.el.classList.remove('active');
   activeBubble = data;
   data.el.classList.add('active');
+  selectedEdge = null;
+  if (shapePicker) shapePicker.value = data.shape || 'ellipse';
   if (stateModule?.setSelectedNode) stateModule.setSelectedNode(data.id);
   updateSidebar();
 }
@@ -2226,7 +3057,33 @@ function makeBubbleActive(data) {
 
 // Attach to all bubbles after creation
 function enableBubbleInteractions(bubble, data) {
-  bubble.addEventListener('click', () => {
+  bubble.addEventListener('click', (event) => {
+    const additive = !!(event.shiftKey || event.metaKey || event.ctrlKey);
+    if (activeTool === 'connect' || isConnectMode) {
+      if (!selectedBubble) {
+        selectedBubble = data;
+        bubble.style.outline = '2px solid yellow';
+        return;
+      }
+      if (selectedBubble !== data) {
+        addConnection(selectedBubble, data, { label: '' });
+        saveSnapshot();
+      }
+      selectedBubble.el.style.outline = '';
+      selectedBubble = null;
+      return;
+    }
+    if (additive) {
+      toggleBubbleInSelection(data, true);
+    } else {
+      clearMultiSelection();
+      if (data.groupId) {
+        bubbles.filter((item) => item.groupId === data.groupId).forEach((item) => multiSelection.add(item));
+      } else {
+        multiSelection.add(data);
+      }
+      updateMultiSelectionVisuals();
+    }
     makeBubbleActive(data);
   });
 }
@@ -2404,6 +3261,9 @@ function updateSidebar() {
     li.draggable = true;
 
     li.addEventListener('click', () => {
+      clearMultiSelection();
+      multiSelection.add(b);
+      updateMultiSelectionVisuals();
       makeBubbleActive(b);
       camX = b.x - getWorkspaceWidth() / 2 / zoom;
       camY = b.y - window.innerHeight / 2 / zoom;
@@ -2495,6 +3355,10 @@ function createBubble(text, x, y, type = 'idea') {
     metadata: normalizedNode.metadata,
     aiSummary: normalizedNode.aiSummary,
     voiceNote: normalizedNode.voiceNote,
+    shape: normalizedNode.shape || 'ellipse',
+    width: Number.isFinite(normalizedNode.width) ? normalizedNode.width : 180,
+    height: Number.isFinite(normalizedNode.height) ? normalizedNode.height : 90,
+    groupId: normalizedNode.groupId || null,
     createdAt: normalizedNode.createdAt,
     updatedAt: normalizedNode.updatedAt
   };
@@ -2506,6 +3370,10 @@ function createBubble(text, x, y, type = 'idea') {
   applyBubbleVisualState(data);
 
   attachBubbleDblClickHandler(bubble, data);
+  createConnectorsForBubble(bubble, data);
+  createResizeHandlesForBubble(bubble, data);
+  applyBubbleSize(data);
+  applyBubbleShape(data, data.shape);
 
 
   enableDragging(bubble, data);

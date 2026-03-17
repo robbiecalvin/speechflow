@@ -69,15 +69,84 @@
 
     <div id="sidebarColumns" class="expanded">
       <div id="controlPanel">
-        <button id="lockToggle"><span class="btn-icon">🔒</span><span class="btn-label">Lock/Unlock</span></button>
-        <button id="deleteBubble"><span class="btn-icon">🗑️</span><span class="btn-label">Delete</span></button>
-        <button id="quickConnect"><span class="btn-icon">🔗</span><span class="btn-label">Connect</span></button>
-        <button id="snapCenter"><span class="btn-icon">🎯</span><span class="btn-label">Snap to Center</span></button>
-        <button id="exportImageBtn"><span class="btn-icon">📸</span><span class="btn-label">Export Image</span></button>
-        <button id="addBubbleBtn"><span class="btn-icon">➕</span><span class="btn-label">Add Bubble</span></button>
-        <button id="clearMap"><span class="btn-icon">🧹</span><span class="btn-label">Clear Map</span></button>
+        <details class="panel-group" open>
+          <summary>Core</summary>
+          <div class="panel-content">
+            <div class="control-grid two-col">
+              <button id="addBubbleBtn"><span class="btn-icon">➕</span><span class="btn-label">Add Bubble</span></button>
+              <button id="quickConnect"><span class="btn-icon">🔗</span><span class="btn-label">Quick Connect</span></button>
+              <button id="lockToggle"><span class="btn-icon">🔒</span><span class="btn-label">Lock/Unlock</span></button>
+              <button id="deleteBubble"><span class="btn-icon">🗑️</span><span class="btn-label">Delete Active</span></button>
+              <button id="generateFromPrompt"><span class="btn-icon">🧠</span><span class="btn-label">From Prompt</span></button>
+              <button id="clearMap"><span class="btn-icon">🧹</span><span class="btn-label">Clear Map</span></button>
+            </div>
+            <div class="control-grid two-col">
+              <button id="undoBtn" type="button" title="Undo (Ctrl/Cmd+Z)"><span class="btn-icon">↩️</span><span class="btn-label">Undo</span></button>
+              <button id="redoBtn" type="button" title="Redo (Ctrl/Cmd+Y)"><span class="btn-icon">↪️</span><span class="btn-label">Redo</span></button>
+            </div>
+            <button id="snapCenter"><span class="btn-icon">🎯</span><span class="btn-label">Snap to Center</span></button>
+            <button id="exportImageBtn"><span class="btn-icon">📸</span><span class="btn-label">Export Image</span></button>
+          </div>
+        </details>
+
+        <details class="panel-group" open>
+          <summary>Tools</summary>
+          <div class="panel-content">
+            <div class="control-grid three-col">
+              <button id="toolSelect" type="button" title="Select (V)"><span class="btn-icon">🖱️</span><span class="btn-label">Select</span></button>
+              <button id="toolPan" type="button" title="Pan (H)"><span class="btn-icon">✋</span><span class="btn-label">Pan</span></button>
+              <button id="toolConnect" type="button" title="Connect (C)"><span class="btn-icon">🔌</span><span class="btn-label">Connect</span></button>
+            </div>
+            <div id="toolbarStatus" class="editor-status">Select tool active</div>
+          </div>
+        </details>
+
+        <details class="panel-group" open>
+          <summary>Selection</summary>
+          <div class="panel-content">
+            <div class="control-grid three-col">
+              <button id="copySelectionBtn" type="button" title="Copy (Ctrl/Cmd+C)"><span class="btn-icon">📄</span><span class="btn-label">Copy</span></button>
+              <button id="cutSelectionBtn" type="button" title="Cut (Ctrl/Cmd+X)"><span class="btn-icon">📋</span><span class="btn-label">Cut</span></button>
+              <button id="pasteSelectionBtn" type="button" title="Paste (Ctrl/Cmd+V)"><span class="btn-icon">📥</span><span class="btn-label">Paste</span></button>
+            </div>
+            <div class="control-grid two-col">
+              <button id="duplicateSelectionBtn" type="button" title="Duplicate (Ctrl/Cmd+D)"><span class="btn-icon">🧬</span><span class="btn-label">Duplicate</span></button>
+              <button id="deleteSelectionBtn" type="button" title="Delete (Delete/Backspace)"><span class="btn-icon">✂️</span><span class="btn-label">Delete</span></button>
+              <button id="groupSelectionBtn" type="button" title="Group (Ctrl/Cmd+G)"><span class="btn-icon">🧩</span><span class="btn-label">Group</span></button>
+              <button id="ungroupSelectionBtn" type="button" title="Ungroup (Shift+Ctrl/Cmd+G)"><span class="btn-icon">🪓</span><span class="btn-label">Ungroup</span></button>
+            </div>
+            <button id="frameSelectionBtn" type="button" title="Create Frame from Selection"><span class="btn-icon">🖼️</span><span class="btn-label">Frame Selection</span></button>
+          </div>
+        </details>
+
+        <details class="panel-group" open>
+          <summary>Arrange & Style</summary>
+          <div class="panel-content">
+            <div class="control-grid two-col">
+              <button id="alignLeftBtn" type="button" title="Align Left"><span class="btn-icon">⬅️</span><span class="btn-label">Align Left</span></button>
+              <button id="alignTopBtn" type="button" title="Align Top"><span class="btn-icon">⬆️</span><span class="btn-label">Align Top</span></button>
+              <button id="distributeHorizontalBtn" type="button" title="Distribute Horizontally"><span class="btn-icon">↔️</span><span class="btn-label">Distribute X</span></button>
+              <button id="distributeVerticalBtn" type="button" title="Distribute Vertically"><span class="btn-icon">↕️</span><span class="btn-label">Distribute Y</span></button>
+            </div>
+            <label class="panel-inline-label" for="shapePicker">Node Shape</label>
+            <select id="shapePicker" title="Shape">
+              <option value="ellipse">Ellipse</option>
+              <option value="rect">Rectangle</option>
+              <option value="rounded">Rounded</option>
+              <option value="diamond">Diamond</option>
+              <option value="speech">Speech</option>
+              <option value="swimlane">Swimlane</option>
+              <option value="frame">Frame</option>
+            </select>
+            <button id="applyShapeBtn" type="button" title="Apply shape to selected nodes"><span class="btn-icon">🎨</span><span class="btn-label">Apply Shape</span></button>
+            <button id="toggleEdgeRoutingBtn" type="button" title="Toggle edge routing mode"><span class="btn-icon">📐</span><span class="btn-label">Orthogonal: On</span></button>
+            <label class="panel-checkbox" for="snapToGridInput">
+              <input id="snapToGridInput" type="checkbox">
+              Snap to grid
+            </label>
+          </div>
+        </details>
         <input type="file" id="importMap" style="display:none" accept=".json">
-        <button id="generateFromPrompt"><span class="btn-icon">🧠</span><span class="btn-label">Create from Prompt</span></button>
       </div>
 
       <div id="bubbleColumn">
@@ -105,6 +174,7 @@
 
   <canvas id="connections"></canvas>
   <canvas id="clickLayer" style="position:absolute;top:0;left:0;z-index:2"></canvas>
+  <div id="selectionMarquee" class="hidden" aria-hidden="true"></div>
 
   <div id="bubbleEditorModal" class="modal hidden" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="bubbleEditorTitle">

@@ -25,6 +25,10 @@
       metadata: source.metadata && typeof source.metadata === 'object' ? source.metadata : {},
       aiSummary: typeof source.aiSummary === 'string' ? source.aiSummary : '',
       voiceNote: typeof source.voiceNote === 'string' ? source.voiceNote : '',
+      shape: typeof source.shape === 'string' ? source.shape : 'ellipse',
+      width: Number.isFinite(source.width) ? source.width : 180,
+      height: Number.isFinite(source.height) ? source.height : 90,
+      groupId: typeof source.groupId === 'string' ? source.groupId : null,
       createdAt: normalizeDate(source.createdAt),
       updatedAt: normalizeDate(source.updatedAt)
     };
