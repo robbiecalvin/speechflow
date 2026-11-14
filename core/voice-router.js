@@ -4,6 +4,12 @@
   const DESTRUCTIVE_INTENTS = new Set(['clear_map', 'delete_selected_bubble']);
 
   const INTENT_HANDLER_MAP = {
+    invalid_command:'onInvalidCommand',
+    rename_bubble:'onRenameBubble',
+    change_bubble_type:'onChangeBubbleType',
+    label_connection:'onLabelConnection',
+    set_start:'onSetStart',
+    set_layout:'onSetLayout',
     arrange_map: 'onArrangeMap',
     connect_bubbles: 'onConnectBubbles',
     set_tool: 'onSetTool',
@@ -47,7 +53,7 @@
 
       if (parsed.mode === 'dictation') {
         if (typeof opts.onDictation === 'function') {
-          opts.onDictation(parsed.args.transcript, parsed);
+          return opts.onDictation(parsed.args.transcript, parsed);
         }
         return;
       }
@@ -65,24 +71,25 @@
           opts.onQuestionIntent(parsed.args.remainder || '', parsed);
         }
         if (parsed.args.remainder && typeof opts.onDictation === 'function') {
-          opts.onDictation(parsed.args.remainder, parsed);
+          return opts.onDictation(parsed.args.remainder, parsed);
         }
         return;
       }
 
       const handlerName = INTENT_HANDLER_MAP[parsed.intent];
       const handler = handlerName ? opts[handlerName] : null;
-      if (!handler || typeof handler !== 'function') return;
+      if (!handler || typeof handler !== 'function') return {status:'error',message:'This command is unavailable.'};
 
       if (DESTRUCTIVE_INTENTS.has(parsed.intent) && typeof opts.confirmDestructive === 'function') {
         const approved = !!opts.confirmDestructive(parsed);
-        if (!approved) return;
+        if (!approved) return {status:'cancelled',message:'Cancelled. Your map has not changed.'};
       }
 
-      handler(parsed.args || {}, parsed);
+      const result = handler(parsed.args || {}, parsed);
       if (typeof opts.onIntent === 'function') {
         opts.onIntent(parsed);
       }
+      return result;
     }
 
     return {

@@ -51,7 +51,8 @@
     emptyList.textContent = bubbles.length ? 'No matching thoughts.' : 'Your thoughts will find a home here.';
   }
   new MutationObserver(filterThoughts).observe($('bubbleList'), {childList:true});
-  function notify(message) {
+  function notify(message, status = 'info') {
+    window.SpeechFlowWorkbench?.showOutcome(message,status);
     $('captureFeedback').textContent = message;
     $('workspaceToast').textContent = message; $('workspaceToast').classList.remove('hidden');
     clearTimeout(toastTimer); toastTimer = setTimeout(() => $('workspaceToast').classList.add('hidden'), 3500);
@@ -130,46 +131,54 @@
     mode = next; document.body.dataset.workspaceMode = mode;
     document.querySelectorAll('[data-mode]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.mode === mode)));
     $('presentationControls').classList.toggle('hidden', mode !== 'present');
-    if (mode === 'present') { setActiveTool('select'); fit(); }
+    if (mode === 'present') { setActiveTool('select'); fit(); window.SpeechFlowWorkbench?.presentationStart(); }
     else { if (bubbles.length) fit(); if (mode === 'capture') $('quickCapture').focus(); }
     notify(mode === 'present' ? 'Use ← and → to walk through your thoughts. Escape to return.' : mode === 'capture' ? 'Capture mode · keep your thoughts flowing.' : 'Explore mode · select, connect, and arrange.');
   }
   function navigate(direction) {
+    if (window.SpeechFlowWorkbench?.navigate(direction)) return;
     if (!bubbles.length) return notify('Your map is empty. Capture a thought first.');
     const index = bubbles.indexOf(activeBubble);
     const target = index < 0 ? (direction > 0 ? 0 : bubbles.length-1) : (index + direction + bubbles.length) % bubbles.length;
     selectBubbleByIndex(target); $('presentationPosition').textContent = `${target+1} / ${bubbles.length} · ${getBubbleDisplayText(bubbles[target]).slice(0,45)}`;
   }
   function connect(from, to) {
-    if (!bubbles[from] || !bubbles[to]) return notify('Choose two existing thought numbers.');
-    if (from === to) return notify('Choose two different thoughts to connect.');
-    if (connections.some(c => c.from === bubbles[from] && c.to === bubbles[to])) return notify('These thoughts are already connected.');
-    addConnection(bubbles[from], bubbles[to]); saveSnapshot(); notify(`Connected thought ${from+1} to ${to+1}.`);
+    if (!bubbles[from] || !bubbles[to]) return {status:'error',message:'Choose two existing thought numbers.'};
+    if (from === to) return {status:'error',message:'Choose two different thoughts to connect.'};
+    if (connections.some(c => c.from === bubbles[from] && c.to === bubbles[to])) return {status:'info',message:'These thoughts are already connected.'};
+    addConnection(bubbles[from], bubbles[to]); saveSnapshot(); return {status:'success',message:`Connected thought ${from+1} to ${to+1}.`};
   }
-  function submit(raw) {
+  function submit(raw, options = {}) {
     const text = String(raw || '').trim(); if (!text) return false;
     if (window.SpeechFlowTutorial?.handleVoice(text)) return true;
+    const feedback = window.SpeechFlowWorkbench;
+    feedback?.heard(options.heard || text, options.source || 'typed');
+    try {
     const parsed = voiceParserModule.parseVoiceInput(text);
+    if(parsed.mode==='ignore'){notify('Say a thought or command to begin.','info');return false;}
     const connectControl = ['set_connect_mode_on', 'set_connect_mode_off', 'toggle_connect_mode'].includes(parsed.intent);
-    if (connectControl || (isConnectMode && parsed.intent === 'connect_bubbles')) {
-      voiceRouter.route(text);
-      return true;
-    }
+    const connectionCommand = isConnectMode && parsed.intent === 'connect_bubbles';
     const createsBubble = parsed.mode === 'dictation' || parsed.intent === 'add_bubble' || /^set_(question|task|note|blocker|idea)_intent$/.test(parsed.intent);
-    if (isConnectMode && (createsBubble || voiceInputMode === 'dictation')) {
-      blockCreationInConnectMode();
-      return false;
+    if (!connectControl && !connectionCommand && isConnectMode && (createsBubble || voiceInputMode === 'dictation')) {
+      blockCreationInConnectMode();feedback?.showOutcome('End connected mode before creating new thoughts.','error');return false;
     }
-    if (voiceInputMode === 'commands' && parsed.mode !== 'command') { notify('Command not recognized. Open Commands to find a phrase.'); return false; }
-    if (parsed.mode === 'command' && voiceInputMode !== 'dictation') notify(`Command: ${text}`);
-    if (voiceInputMode === 'dictation') { lastSpokenIntent = 'idea'; createBubbleFromVoiceTranscript(text); }
-    else { lastSpokenIntent = 'idea'; voiceRouter.route(text); }
-    if (parsed.mode === 'dictation' || parsed.intent === 'add_bubble' || parsed.intent.startsWith('set_') && parsed.intent.endsWith('_intent') || voiceInputMode === 'dictation') {
-      const last = bubbles[bubbles.length-1]; if (last) makeBubbleActive(last);
-      fit();
-      notify('Thought captured. Keep going.');
+    if (!connectControl && !connectionCommand && voiceInputMode === 'commands' && parsed.mode !== 'command') {
+      notify('Command not recognized. Open Commands to find a phrase.','error');return false;
     }
+    if (document.body.dataset.workspaceMode === 'present' && (parsed.mode==='dictation' || voiceInputMode==='dictation' || ['add_bubble','rename_bubble','change_bubble_type','clear_map','delete_selected_bubble','connect_bubbles','arrange_map','set_layout','undo','redo','label_connection','set_start'].includes(parsed.intent))) {
+      notify('Return to Explore mode before editing your map.','error');return false;
+    }
+    const beforeCount=bubbles.length;
+    const version=feedback?.notificationVersion;
+    let result;
+    if (!connectControl && !connectionCommand && voiceInputMode === 'dictation') {lastSpokenIntent='idea';result=createBubbleFromVoiceTranscript(text);}
+    else {lastSpokenIntent='idea';result=voiceRouter.route(text);}
+    if (result?.status) {notify(result.message,result.status);return result.status==='success';}
+    if (bubbles.length>beforeCount) {
+      makeBubbleActive(bubbles[bubbles.length-1]);fit();notify(storageFailures.size?'Thought captured, but not saved. Download a backup now.':'Thought captured. Keep going.',storageFailures.size?'error':'success');
+    } else if(version===feedback?.notificationVersion) notify('Command completed.','success');
     return true;
+    } finally { feedback?.finishInput(); }
   }
   $('captureForm').addEventListener('submit', e => { e.preventDefault(); if (submit($('quickCapture').value)) $('quickCapture').value = ''; });
   $('voiceInputMode').addEventListener('change', e => { voiceInputMode = e.target.value; notify(`${e.target.selectedOptions[0].text} enabled.`); });

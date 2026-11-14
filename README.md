@@ -27,7 +27,7 @@ python3 -m http.server 8080
 
 - **Explore** keeps the editing tools and searchable thought list available. Drag thoughts, use the connector handles, or choose the connect tool to link them. Double-click a thought to edit it.
 - **Capture** clears away the editing panels so you can keep adding thoughts.
-- **Present** hides the sidebar and capture dock. Use the previous/next buttons or arrow keys to step through thoughts; press Escape to return. Editing keyboard shortcuts are disabled during presentation.
+- **Present** hides editing controls and follows directed connections from your chosen starting thought. Notes appear as captions. Use the arrows to move through the story; press Escape to return. Cycles and disconnected branches are each visited once. Voice dictation and editing shortcuts are blocked during presentation.
 
 The capture bar accepts text and commands. **Smart input** understands both; **Dictation only** treats everything as a thought, including phrases like “clear map”; **Commands only** rejects unknown commands instead of creating thoughts. The microphone is off by default. Enable it explicitly, then grant browser permission. Voice settings also support a wake phrase and push-to-talk.
 
@@ -35,7 +35,28 @@ Use **Commands** or Ctrl/Cmd+K to search and run commands. Try `task Ship the MV
 
 Connect mode pauses all bubble creation until you say `end connected mode` or use the explicit End connect mode button. Say `connect bubbles 1 and 2` to draw a connection and remain in connect mode.
 
-Starter templates create an editable project plan, decision map, or brainstorm. Arrange tidies unlocked thoughts into a grid and supports undo. Fit changes only the camera. Image export captures the entire map, including labeled directed connections, as a PNG (up to 4096 pixels per side). Thoughts and map history stay in browser storage on the current device; export JSON to keep a portable backup.
+Select a thought to open its **inspector**: edit text, type, and notes; choose the presentation starting point; and label its connections. Apply changes to save an undoable edit. Selecting a connection opens its label editor. On a small screen, use Inspect selection to open the sidebar.
+
+Starter templates create an editable project plan, decision map, or brainstorm. Choose **Grid**, **Flowchart**, **Mind map**, or **Timeline** beside Arrange. Flowchart uses directed layers, Mind map spreads thoughts around a starting point, and Timeline follows story order. Layouts preserve locked positions and support undo. Fit changes only the camera. Image export captures the entire map, including labeled directed connections, as a PNG (up to 4096 pixels per side). Thoughts and map history stay in browser storage on the current device; export JSON to keep a portable backup.
+
+## Voice feedback and corrections
+
+The feedback card shows **Heard** for recognized speech (or **Entered** for typed input), followed by the actual outcome. Failed targets, duplicate connections, cancelled confirmations, and incomplete corrections give feedback without creating unwanted thoughts.
+
+- `rename bubble two to NASA Launch Plan`
+- `change bubble three to a task`
+- `label connection one to two as Depends on`
+- `start presentation at bubble one`
+- `flowchart layout`, `mind map layout`, or `timeline layout`
+- `undo that`
+
+Corrections preserve capitalization. End connected mode before editing thoughts or arranging layouts.
+
+## Backups and recovery
+
+**Backups** in the header offers JSON downloads, imports, and recent recovery points. The save indicator recommends a download and flags when your downloaded backup is out of date. Recovery points are created after edits and before deleting or replacing a map; the latest 24 are retained across maps. **Restore a copy** preserves the current map and opens a new recovered map.
+
+Recovery points are stored in the same browser, so they do not replace an external backup. Keep a downloaded JSON file somewhere independent. If browser storage is full or unavailable, the app reports that changes are not saved and keeps downloads available. If session history is damaged, startup tries a validated saved map or recovery point and retains the damaged history on this device.
 
 ## Guided Tutorial
 
@@ -48,13 +69,13 @@ Choose **Enable voice** and grant microphone permission to say **“next”** fo
 No build step or application dependencies are required. Run the core regression tests with Node:
 
 ```bash
-node --test tests/voice.test.cjs tests/tutorial.test.cjs tests/recognition.test.cjs
+node --test tests/voice.test.cjs tests/tutorial.test.cjs tests/recognition.test.cjs tests/workbench.test.cjs
 ```
 
 With the local HTTP server running and Playwright available in your development environment, run the Chromium smoke checks:
 
 ```bash
-node --test tests/workflows.test.cjs
+node --test tests/workflows.test.cjs tests/enhancements.test.cjs
 node tests/browser-smoke.cjs
 ```
 

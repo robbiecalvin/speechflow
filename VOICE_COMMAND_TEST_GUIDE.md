@@ -37,6 +37,19 @@ Additional commands:
 
 Selection and connection numbers accept digits and the words one through ten. Typed prefixes and add-bubble commands preserve capitalization in the captured text. A wake phrase must match a complete word, so the wake phrase `flow` does not match `flower`.
 
+## Corrections, Layouts, and Presentation
+
+| Phrase | Expected behavior |
+| --- | --- |
+| `rename bubble two to NASA Launch Plan` | Updates text and preserves capitalization |
+| `change bubble three to a task` | Updates type without losing notes, shape, or connections |
+| `label connection one to two as Depends on` | Labels an existing directed connection |
+| `start presentation at bubble one` | Saves the starting point with the map |
+| `flowchart layout`, `mind map layout`, `timeline layout` | Applies an undoable layout, preserving locked positions |
+| `undo that` | Undoes the last change, or reports there is nothing to undo |
+
+The feedback card shows what was heard and whether the action succeeded, failed, or was cancelled. Test invalid thought numbers and incomplete corrections; they must not create a bubble. Test cancelling clear-map confirmation; the result must say cancelled. In Present mode, dictation and editing commands must leave the map unchanged. End connected mode before renaming thoughts, changing types, or arranging layouts.
+
 ## Runtime Preconditions
 - If **wake phrase mode** is enabled, every spoken command must start with your configured wake phrase.
   - Example with wake phrase `speechflow`: `speechflow connect mode`

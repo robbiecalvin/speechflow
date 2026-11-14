@@ -1,3 +1,20 @@
+const storageFailures = new Map();
+let startupRecoveryMessage = null;
+function persistLocalValue(key, value) {
+  try { localStorage.setItem(key, value); storageFailures.delete(key); return true; }
+  catch (error) {
+    storageFailures.set(key, true);
+    document.dispatchEvent(new Event('speechflow:storageerror'));
+    window.SpeechFlowWorkspace?.notify('Browser storage is unavailable. Download a JSON backup to keep your changes.');
+    return false;
+  }
+}
+
+function readLocalValue(key) {
+  try { const value = localStorage.getItem(key); storageFailures.delete(`read:${key}`); return value; }
+  catch { storageFailures.set(`read:${key}`,true); return null; }
+}
+
 let activeBubble = null;
 let microphoneEnabled = false;
 let voiceInputMode = 'smart';
@@ -385,7 +402,7 @@ function generateMapId() {
 
 function loadMapDatabase() {
   try {
-    const raw = localStorage.getItem('mapDatabase');
+    const raw = readLocalValue('mapDatabase');
     mapDatabase = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(mapDatabase)) mapDatabase = [];
   } catch (err) {
@@ -394,7 +411,7 @@ function loadMapDatabase() {
 }
 
 function saveMapDatabase() {
-  localStorage.setItem('mapDatabase', JSON.stringify(mapDatabase));
+  persistLocalValue('mapDatabase', JSON.stringify(mapDatabase));
 }
 
 function upsertCurrentMapRecord() {
@@ -442,8 +459,9 @@ function renderMapHistoryList() {
     loadBtn.textContent = 'Load';
     loadBtn.addEventListener('click', () => {
       if (blockCreationInConnectMode()) return;
-      activeMapId = record.id;
-      restoreStateFromSnapshot(record.snapshot);
+      const saved = persistenceModule.parseSnapshot(record.snapshot);
+      saved.mapId = record.id;
+      restoreStateFromSnapshot(saved);
       undoStack = [];
       redoStack = [];
       closeMapHistoryModal();
@@ -457,6 +475,8 @@ function renderMapHistoryList() {
 }
 
 function clearMapData() {
+  window.SpeechFlowWorkbench?.checkpoint();
+  clearTimeout(playbackTimer);
   document.querySelectorAll('.bubble').forEach((b) => b.remove());
   bubbles.length = 0;
   connections.length = 0;
@@ -690,12 +710,12 @@ function createNewMapFromSetup() {
       DEFAULT_BUBBLE_TYPE_LABELS[type]
     );
   });
+  clearMapData();
   setMapName(proposedMapName);
   activeMapId = generateMapId();
   undoStack = [];
   redoStack = [];
-  localStorage.removeItem('bubbleHistory');
-  clearMapData();
+  try { localStorage.removeItem('bubbleHistory'); } catch { storageFailures.set('bubbleHistory',true); }
   applyBubbleTypeConfig({ labels: configuredLabels, locked: true, usePlaceholders: false });
   closeMapSetupModal();
   saveSnapshot();
@@ -712,6 +732,7 @@ function setBubbleType(data, newType) {
 }
 
 function removeBubble(data, shouldSaveSnapshot = true) {
+  window.SpeechFlowWorkbench?.checkpoint();
   if (data?.el?.parentNode) data.el.parentNode.removeChild(data.el);
   multiSelection.delete(data);
   const index = bubbles.indexOf(data);
@@ -897,15 +918,7 @@ if (mapHistoryBtn) {
 }
 
 if (exportMapIconBtn) {
-  exportMapIconBtn.addEventListener('click', () => {
-    const json = getStateSnapshot();
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${mapName.replace(/\s+/g, '_').toLowerCase() || 'mindmap'}.json`;
-    link.click();
-  });
+  exportMapIconBtn.addEventListener('click', () => window.SpeechFlowWorkbench?.downloadBackup());
 }
 
 if (importMapIconBtn) {
@@ -1005,9 +1018,14 @@ if (voiceSettingsSave) {
       return;
     }
 
-    voiceSettings = voiceSettingsModule?.saveSettings
-      ? voiceSettingsModule.saveSettings(sanitized)
-      : sanitized;
+    try {
+      voiceSettings = voiceSettingsModule?.saveSettings
+        ? voiceSettingsModule.saveSettings(sanitized)
+        : sanitized;
+    } catch {
+      voiceSettings = sanitized;
+      window.SpeechFlowWorkspace?.notify('Voice settings apply for this session, but browser storage could not save them.', 'error');
+    }
     applyVoiceSettingsToForm();
     applyVoiceSettingsRuntime();
     closeVoiceSettingsModal();
@@ -2077,29 +2095,36 @@ const voiceRouter = voiceRouterModule?.createVoiceRouter && voiceParserModule?.p
     parser: voiceParserModule,
     confirmDestructive: (parsed) => confirm(getDestructiveVoiceConfirmMessage(parsed)),
     onSelectBubble: (args) => {
-      if (!bubbles[args.bubbleIndex]) { updateVoiceTranscriptDisplay('That thought number does not exist.'); return; }
+      if (!bubbles[args.bubbleIndex]) return {status:'error',message:'That thought number does not exist.'};
       selectBubbleByIndex(args.bubbleIndex);
+      return {status:'success',message:`Selected thought ${args.bubbleIndex+1}.`};
     },
     onToggleConnectMode: () => toggleConnectModeFromVoice(),
     onSetConnectModeOn: () => setConnectModeFromVoice(true),
     onSetConnectModeOff: () => setConnectModeFromVoice(false),
-    onClearMap: () => clearMapFromVoice(),
-    onStartPlayback: () => startPlayback(),
+    onClearMap: () => {clearMapFromVoice();return {status:'success',message:'Map cleared. You can undo this change.'};},
+    onStartPlayback: () => {if(!bubbles.length)return {status:'error',message:'Capture a thought before starting playback.'}; startPlayback();},
     onStopPlayback: () => stopPlayback(),
-    onPausePlayback: () => pausePlayback(),
-    onResumePlayback: () => resumePlayback(),
-    onUndo: () => undo(),
-    onRedo: () => redo(),
+    onPausePlayback: () => {if(!playbackActive)return {status:'info',message:'Playback is not running.'};pausePlayback();},
+    onResumePlayback: () => {if(!playbackActive)return {status:'info',message:'Start playback before resuming it.'};resumePlayback();},
+    onUndo: () => { if(isConnectMode)return {status:'error',message:'End connected mode before undoing.'}; if(undoStack.length<=1)return {status:'info',message:'Nothing to undo.'}; undo(); return {status:'success',message:'Undid the last change.'}; },
+    onRedo: () => { if(isConnectMode)return {status:'error',message:'End connected mode before redoing.'}; if(!redoStack.length)return {status:'info',message:'Nothing to redo.'}; redo(); return {status:'success',message:'Redid the last change.'}; },
     onAddBubble: (args) => addBubbleFromVoice(args.transcript),
-    onDeleteSelectedBubble: () => deleteSelectedBubbleFromVoice(),
-    onLockSelectedBubble: () => setLockSelectedBubbleFromVoice(true),
-    onUnlockSelectedBubble: () => setLockSelectedBubbleFromVoice(false),
+    onDeleteSelectedBubble: () => { if(!activeBubble)return {status:'error',message:'Select a thought before deleting it.'};deleteSelectedBubbleFromVoice(); },
+    onLockSelectedBubble: () => {if(!activeBubble)return {status:'error',message:'Select a thought before locking it.'};setLockSelectedBubbleFromVoice(true);return {status:'success',message:'Selected thought locked in place.'};},
+    onUnlockSelectedBubble: () => {if(!activeBubble)return {status:'error',message:'Select a thought before unlocking it.'};setLockSelectedBubbleFromVoice(false);return {status:'success',message:'Selected thought unlocked.'};},
     onSnapCenter: () => controlPanel.querySelector('#snapCenter')?.click(),
     onOpenPromptModal: () => openPromptModal(),
     onOpenVoiceSettings: () => openVoiceSettingsModal(),
     onCloseVoiceSettings: () => closeVoiceSettingsModal(),
     onVoiceHelp: () => window.SpeechFlowWorkspace?.openCommands(),
-    onArrangeMap: () => window.SpeechFlowWorkspace?.arrange(),
+    onInvalidCommand: args => ({status:'error',message:args.message}),
+    onRenameBubble: args => window.SpeechFlowWorkbench?.rename(args.index,args.text),
+    onChangeBubbleType: args => window.SpeechFlowWorkbench?.changeType(args.index,args.type),
+    onLabelConnection: args => window.SpeechFlowWorkbench?.labelConnection(args.from,args.to,args.label),
+    onSetStart: args => window.SpeechFlowWorkbench?.setStart(args.index),
+    onSetLayout: args => window.SpeechFlowWorkbench?.applyLayout(args.layout),
+    onArrangeMap: () => window.SpeechFlowWorkbench?.applyLayout('grid'),
     onSetTool: (args) => setActiveTool(args.tool),
     onZoom: (args) => window.SpeechFlowWorkspace?.zoom(args.direction),
     onFitMap: () => window.SpeechFlowWorkspace?.fit(),
@@ -2143,16 +2168,22 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
       const confidence = Number(event?.results?.[event.results.length - 1]?.[0]?.confidence);
       if (Number.isFinite(confidence) && confidence < voiceSettings.confidenceThreshold) {
         updateVoiceTranscriptDisplay(`Ignored low-confidence input (${confidence.toFixed(2)}).`);
+        window.SpeechFlowWorkbench?.heard(transcript,'voice');
+        window.SpeechFlowWorkbench?.showOutcome('Not confident enough to act. Please try again.','error');
+        window.SpeechFlowWorkbench?.finishInput();
         return;
       }
       updateVoiceTranscriptDisplay(transcript);
       const routedTranscript = stripWakePhraseIfNeeded(transcript);
       if (voiceSettings.wakePhraseEnabled && !routedTranscript) {
         updateVoiceTranscriptDisplay('Wake phrase required.');
+        window.SpeechFlowWorkbench?.heard(transcript,'voice');
+        window.SpeechFlowWorkbench?.showOutcome('Say your wake phrase before the command.','info');
+        window.SpeechFlowWorkbench?.finishInput();
         return;
       }
       if (window.SpeechFlowWorkspace) {
-        window.SpeechFlowWorkspace.submit(routedTranscript);
+        window.SpeechFlowWorkspace.submit(routedTranscript, {source:'voice',heard:transcript});
         return;
       }
       if (voiceRouter) {
@@ -2161,7 +2192,7 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
       }
       createBubbleFromVoiceTranscript(routedTranscript);
     },
-    onRecognitionError: () => {}
+    onRecognitionError: error => window.SpeechFlowWorkbench?.showOutcome(error.message,'error')
   })
   : null;
 
@@ -2562,9 +2593,33 @@ function animate() {
       ctx.stroke();
     }
 
-    const midX = (fromX + toX) / 2;
-    const midY = (fromY + toY) / 2 - 10 * zoom;
-    ctx.fillText(conn.label || '', midX, midY);
+    // Arrowheads meet the target boundary, including at non-default zoom levels.
+    let dx = toX - midX2, dy = toY - midY2;
+    let labelX = (fromX + toX) / 2, labelY = (fromY + toY) / 2 - 10;
+    if (getEdgeRoutingMode(conn) === 'orthogonal') {
+      const bend = getEdgeBend(conn, fromX, fromY, toX, toY);
+      if (bend.orientation === 'vertical') {
+        dx = toX - bend.bendX; dy = Math.abs(dx) < .1 ? toY - fromY : 0;
+        labelX = bend.bendX; labelY = (fromY + toY) / 2 - 10;
+      } else {
+        dy = toY - bend.bendY; dx = Math.abs(dy) < .1 ? toX - fromX : 0;
+        labelX = (fromX + toX) / 2; labelY = bend.bendY - 10;
+      }
+    }
+    if (Math.abs(dx) + Math.abs(dy) > .1) {
+      const factor = Math.min((conn.to.width * zoom / 2 + 3) / Math.max(Math.abs(dx), .001), (conn.to.height * zoom / 2 + 3) / Math.max(Math.abs(dy), .001));
+      const endX = toX - dx * factor, endY = toY - dy * factor, angle = Math.atan2(dy, dx);
+      ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.moveTo(endX, endY);
+      ctx.lineTo(endX - 10 * Math.cos(angle - .45), endY - 10 * Math.sin(angle - .45));
+      ctx.lineTo(endX - 10 * Math.cos(angle + .45), endY - 10 * Math.sin(angle + .45)); ctx.closePath(); ctx.fill();
+    }
+    if (conn.label) {
+      ctx.font = '12px sans-serif';
+      const labelWidth = Math.min(300, ctx.measureText(conn.label).width + 16);
+      ctx.fillStyle = '#fafbf7'; ctx.beginPath(); ctx.roundRect(labelX - labelWidth / 2, labelY - 13, labelWidth, 20, 5); ctx.fill();
+      ctx.fillStyle = '#52674a'; ctx.fillText(conn.label, labelX, labelY + 1, 284);
+    }
+    ctx.fillStyle = '#52674a';
   });
 
   if (connectorDragState) {
@@ -2808,6 +2863,7 @@ function getStateSnapshot() {
 }
 
 function restoreStateFromSnapshot(snapshot) {
+  window.SpeechFlowWorkbench?.checkpoint();
   activeBubble = null;
   selectedBubble = null;
   const state = persistenceModule?.parseSnapshot
@@ -2918,10 +2974,11 @@ function saveSnapshot() {
   const snap = getStateSnapshot();
   undoStack.push(snap);
   redoStack.length = 0;
-  localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  persistLocalValue('bubbleHistory', JSON.stringify(undoStack));
   if (stateModule?.setDirty) stateModule.setDirty(true);
   syncCoreGraphState();
   upsertCurrentMapRecord();
+  document.dispatchEvent(new Event('speechflow:changed'));
 }
 function updateBubbleIds() {
   bubbles.forEach((b, i) => {
@@ -2937,8 +2994,9 @@ function undo() {
   const snap = undoStack.pop();
   redoStack.push(snap);
   restoreStateFromSnapshot(undoStack[undoStack.length - 1]);
-  localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  persistLocalValue('bubbleHistory', JSON.stringify(undoStack));
   upsertCurrentMapRecord();
+  document.dispatchEvent(new Event('speechflow:changed'));
 }
 
 function redo() {
@@ -2947,8 +3005,9 @@ function redo() {
   const snap = redoStack.pop();
   undoStack.push(snap);
   restoreStateFromSnapshot(snap);
-  localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  persistLocalValue('bubbleHistory', JSON.stringify(undoStack));
   upsertCurrentMapRecord();
+  document.dispatchEvent(new Event('speechflow:changed'));
 }
 
 window.addEventListener('keydown', (e) => {
@@ -3065,12 +3124,41 @@ window.addEventListener('keyup', (e) => {
   updateVoiceTranscriptDisplay('Push-to-talk released.');
 });
 
-// Restore last session
-const history = localStorage.getItem('bubbleHistory');
+// Restore a validated session; retain damaged data and fall back to a saved map.
+const history = readLocalValue('bubbleHistory');
 if (history) {
-  undoStack = JSON.parse(history);
-  if (undoStack.length) {
-    restoreStateFromSnapshot(undoStack[undoStack.length - 1]);
+  try {
+    const parsed = JSON.parse(history);
+    if (!Array.isArray(parsed)) throw new Error('Invalid history');
+    undoStack = parsed.filter(snapshot => {
+      try { speechFlowCore.workbench.validateBackup(snapshot); return true; } catch { return false; }
+    });
+    if (undoStack.length !== parsed.length) {
+      persistLocalValue('speechflow.damagedHistory.v1', history);
+      persistLocalValue('bubbleHistory', JSON.stringify(undoStack));
+      startupRecoveryMessage = 'Some session history could not be read. Your last valid map was recovered; the damaged history was retained on this device.';
+    }
+    if (parsed.length && !undoStack.length) throw new Error('No readable history');
+    if (undoStack.length) restoreStateFromSnapshot(undoStack[undoStack.length - 1]);
+  } catch {
+    persistLocalValue('speechflow.damagedHistory.v1', history);
+    undoStack = [];
+    let recovered = false;
+    let points = [];
+    try { points = JSON.parse(readLocalValue('speechflow.recovery.v1') || '[]'); } catch {}
+    if (!Array.isArray(points)) points = [];
+    const candidates = [...mapDatabase.map(record => ({snapshot:record.snapshot,time:record.updatedAt})), ...points.map(point => ({snapshot:point.snapshot,time:point.savedAt}))].sort((a,b)=>(b.time||0)-(a.time||0));
+    for (const candidate of candidates) {
+      try {
+        speechFlowCore.workbench.validateBackup(candidate.snapshot);
+        restoreStateFromSnapshot(candidate.snapshot);
+        undoStack = [getStateSnapshot()];
+        persistLocalValue('bubbleHistory', JSON.stringify(undoStack));
+        recovered = true;
+        break;
+      } catch { /* Try the next independent saved copy. */ }
+    }
+    startupRecoveryMessage = recovered ? 'Your session history was damaged. A saved copy of your map was recovered. Download a backup now.' : 'Session history could not be read. The damaged data was retained on this device. Use Backups to import or recover a map.';
   }
 }
 
@@ -3092,13 +3180,7 @@ document.getElementById('importMap').addEventListener('change', (e) => {
     try {
       if (blockCreationInConnectMode()) return;
       // Validate before changing the graph, map identity, or history.
-      const raw = JSON.parse(reader.result);
-      if (!raw || !Array.isArray(raw.bubbles) || !Array.isArray(raw.connections) ||
-          raw.bubbles.some(node => !node || typeof node.text !== 'string') ||
-          raw.connections.some(edge => !edge || !Number.isInteger(edge.from) || !Number.isInteger(edge.to) ||
-            edge.from < 0 || edge.to < 0 || edge.from >= raw.bubbles.length || edge.to >= raw.bubbles.length)) {
-        throw new Error('Expected a SpeechFlow map backup.');
-      }
+      const raw = speechFlowCore.workbench.validateBackup(reader.result);
       const imported = persistenceModule.parseSnapshot(raw);
       imported.mapId = generateMapId();
       restoreStateFromSnapshot(imported);
