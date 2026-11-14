@@ -37,18 +37,27 @@ Connect mode pauses all bubble creation until you say `end connected mode` or us
 
 Starter templates create an editable project plan, decision map, or brainstorm. Arrange tidies unlocked thoughts into a grid and supports undo. Fit changes only the camera. Image export captures the entire map, including labeled directed connections, as a PNG (up to 4096 pixels per side). Thoughts and map history stay in browser storage on the current device; export JSON to keep a portable backup.
 
+## Guided Tutorial
+
+A first-visit tooltip tour highlights the capture bar, microphone, input modes, workspace modes, connections, arrangement, search, commands, playback, and backups. Restart it anytime with **Tour** in the header.
+
+Choose **Enable voice** and grant microphone permission to say **“next”** for the next tooltip or **“skip”** to leave the entire tutorial. Back, Next, Finish, and Skip tour buttons also work without a microphone. The tutorial does not change your map or turn examples into bubbles. While it is open, other speech is ignored. Tour commands work without a wake phrase and in every input mode; your existing settings are retained. A microphone enabled only for the tutorial turns off when it ends.
+
 ## Validation
 
 No build step or application dependencies are required. Run the core regression tests with Node:
 
 ```bash
-node --test tests/voice.test.cjs
+node --test tests/voice.test.cjs tests/tutorial.test.cjs tests/recognition.test.cjs
 ```
 
 With the local HTTP server running and Playwright available in your development environment, run the Chromium smoke checks:
 
 ```bash
+node --test tests/workflows.test.cjs
 node tests/browser-smoke.cjs
 ```
 
 The browser checks use `/usr/bin/chromium` by default; set `CHROMIUM_PATH` for another executable or `SPEECHFLOW_URL` for another local server. They use an isolated browser session and simulated recognition to verify the command pipeline. Live microphone recognition and audible speech output require manual testing in a supported browser. See [VOICE_COMMAND_TEST_GUIDE.md](./VOICE_COMMAND_TEST_GUIDE.md).
+
+The workflow tests cover first-visit and replayed tutorials, voice navigation, mobile positioning, unsupported browsers, permission denial, editing, dragging, shape persistence, JSON backup round-trips, invalid imports, map history, and playback controls. The smoke checks also exercise connect-mode creation blocking, duplicate and invalid connections, templates, search, arrangement, PNG export, presentation shortcuts, and mobile fit.

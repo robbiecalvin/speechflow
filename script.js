@@ -441,8 +441,11 @@ function renderMapHistoryList() {
     loadBtn.type = 'button';
     loadBtn.textContent = 'Load';
     loadBtn.addEventListener('click', () => {
+      if (blockCreationInConnectMode()) return;
       activeMapId = record.id;
       restoreStateFromSnapshot(record.snapshot);
+      undoStack = [];
+      redoStack = [];
       closeMapHistoryModal();
       saveSnapshot();
     });
@@ -702,7 +705,9 @@ function setBubbleType(data, newType) {
   if (!ALLOWED_BUBBLE_TYPES.includes(newType)) return;
   data.type = newType;
   data.el.className = `bubble ${newType}`;
+  applyBubbleShape(data, data.shape || 'rounded');
   applyBubbleVisualState(data);
+  data.el.classList.toggle('multi-selected', multiSelection.has(data));
   if (activeBubble === data) data.el.classList.add('active');
 }
 
@@ -2125,8 +2130,12 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
         recoverable: true,
         restart: true
       },
-    shouldAcceptResult: () => microphoneEnabled && !playbackActive && !isAnyModalOpen(),
+    shouldAcceptResult: () => microphoneEnabled && !playbackActive && (!isAnyModalOpen() || window.SpeechFlowTutorial?.active),
     onResult: (transcript, event) => {
+      if (window.SpeechFlowTutorial?.active) {
+        if (!window.SpeechFlowTutorial.handleVoice(transcript)) updateVoiceTranscriptDisplay('Tutorial: say “next” or “skip”.');
+        return;
+      }
       if (isAnyModalOpen()) {
         updateVoiceTranscriptDisplay('Voice input paused while a modal is open.');
         return;
@@ -2161,6 +2170,11 @@ function applyVoiceSettingsRuntime() {
   voiceRecognitionController.setLanguage?.(voiceSettings.language || 'en-US');
   voiceRecognitionController.setAutoRestart?.(voiceSettings.autoRestart !== false);
 
+  if (window.SpeechFlowTutorial?.voiceEnabled) {
+    voiceRecognitionController.setAutoRestart(true);
+    voiceRecognitionController.startListening();
+    return;
+  }
   if (voiceSettings.pushToTalkEnabled) {
     voiceRecognitionController.stopListening();
     transitionVoiceStateSafe(voiceStateMachine.STATES.IDLE, { source: 'push_to_talk_enabled' });
@@ -3031,7 +3045,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (!microphoneEnabled || !voiceSettings.pushToTalkEnabled) return;
+  if (window.SpeechFlowTutorial?.voiceEnabled || !microphoneEnabled || !voiceSettings.pushToTalkEnabled) return;
   if (e.code !== 'Space') return;
   if (isEditableTarget(e.target)) return;
   if (isAnyModalOpen()) return;
@@ -3042,7 +3056,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
-  if (!microphoneEnabled || !voiceSettings.pushToTalkEnabled) return;
+  if (window.SpeechFlowTutorial?.voiceEnabled || !microphoneEnabled || !voiceSettings.pushToTalkEnabled) return;
   if (e.code !== 'Space') return;
   if (isEditableTarget(e.target)) return;
   if (isAnyModalOpen()) return;
@@ -3069,26 +3083,41 @@ if (!activeMapId) {
   }
 }
 document.getElementById('importMap').addEventListener('change', (e) => {
-  const file = e.target.files[0];
+  const input = e.target;
+  const file = input.files[0];
   if (!file) return;
+  if (blockCreationInConnectMode()) { input.value = ''; return; }
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      activeMapId = generateMapId();
-      const content = reader.result;
-      undoStack.push(content); // push to undo
-      redoStack.length = 0;
-      restoreStateFromSnapshot(content);
-      localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
-      upsertCurrentMapRecord();
+      if (blockCreationInConnectMode()) return;
+      // Validate before changing the graph, map identity, or history.
+      const raw = JSON.parse(reader.result);
+      if (!raw || !Array.isArray(raw.bubbles) || !Array.isArray(raw.connections) ||
+          raw.bubbles.some(node => !node || typeof node.text !== 'string') ||
+          raw.connections.some(edge => !edge || !Number.isInteger(edge.from) || !Number.isInteger(edge.to) ||
+            edge.from < 0 || edge.to < 0 || edge.from >= raw.bubbles.length || edge.to >= raw.bubbles.length)) {
+        throw new Error('Expected a SpeechFlow map backup.');
+      }
+      const imported = persistenceModule.parseSnapshot(raw);
+      imported.mapId = generateMapId();
+      restoreStateFromSnapshot(imported);
+      undoStack = [];
+      redoStack = [];
+      saveSnapshot();
+      window.SpeechFlowWorkspace?.fit();
     } catch (err) {
-      alert("Failed to import file. Not valid JSON?");
-      console.error(err);
+      alert('Could not import this file. Choose a valid SpeechFlow JSON map backup. Your current map has been kept.');
+    } finally {
+      input.value = '';
     }
+  };
+  reader.onerror = () => {
+    input.value = '';
+    alert('Could not read this file. Your current map has been kept.');
   };
   reader.readAsText(file);
 });
-
 
 
 // When user clicks a bubble, make it the activeBubble

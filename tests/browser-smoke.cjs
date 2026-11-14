@@ -7,6 +7,7 @@ const {chromium} = require('playwright');
     const page = await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true});
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(() => {
+      localStorage.setItem('speechflow.tutorial.v1','skip');
       window.recognitionStarts=0;
       window.SpeechRecognition=class {
         constructor(){window.testRecognition=this;}

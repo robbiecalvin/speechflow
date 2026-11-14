@@ -20,6 +20,7 @@
     let restartTimer = null;
     let restartAttempts = 0;
     let stoppedByUser = false;
+    let restartAllowed = true;
     let isRunning = false;
 
     function clearRestartTimer() {
@@ -36,7 +37,7 @@
     }
 
     function scheduleRestart() {
-      if (!autoRestart || stoppedByUser) return;
+      if (!autoRestart || stoppedByUser || !restartAllowed) return;
       clearRestartTimer();
       const delay = backoffDelayMs();
       restartAttempts += 1;
@@ -52,11 +53,16 @@
         const lastIndex = event.results.length - 1;
         const transcript = event.results[lastIndex][0].transcript;
         if (onResult) onResult(transcript, event);
-        opts.voiceState.transition(opts.voiceState.STATES.LISTENING, { source: 'onresult_complete' });
+        if (!stoppedByUser && opts.voiceState.getState().state === opts.voiceState.STATES.PROCESSING) {
+          opts.voiceState.transition(opts.voiceState.STATES.LISTENING, { source: 'onresult_complete' });
+        }
       };
 
       recognition.onerror = (event) => {
+        if (stoppedByUser) return;
         const normalizedError = mapError(event);
+        restartAllowed = !!(normalizedError.recoverable && normalizedError.restart);
+        if (!restartAllowed) clearRestartTimer();
         opts.voiceState.setError(normalizedError);
         if (onRecognitionError) onRecognitionError(normalizedError, event);
         if (!normalizedError.recoverable || !normalizedError.restart) {
@@ -110,6 +116,7 @@
       }
 
       stoppedByUser = false;
+      restartAllowed = true;
       clearRestartTimer();
 
       if (startOpts.allowRetry !== false) {
@@ -124,6 +131,8 @@
         return true;
       } catch (error) {
         const normalizedError = mapError({ error: error?.name || 'start_failed' });
+        restartAllowed = !!(normalizedError.recoverable && normalizedError.restart);
+        if (!restartAllowed) clearRestartTimer();
         opts.voiceState.setError(normalizedError);
         if (onRecognitionError) onRecognitionError(normalizedError, error);
         if (normalizedError.restart && normalizedError.recoverable) {

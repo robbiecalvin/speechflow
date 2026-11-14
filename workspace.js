@@ -148,6 +148,7 @@
   }
   function submit(raw) {
     const text = String(raw || '').trim(); if (!text) return false;
+    if (window.SpeechFlowTutorial?.handleVoice(text)) return true;
     const parsed = voiceParserModule.parseVoiceInput(text);
     const connectControl = ['set_connect_mode_on', 'set_connect_mode_off', 'toggle_connect_mode'].includes(parsed.intent);
     if (connectControl || (isConnectMode && parsed.intent === 'connect_bubbles')) {

@@ -5,6 +5,14 @@ This guide reflects the currently implemented parser/router behavior in:
 - `core/voice-router.js`
 - `script.js`
 
+## Tooltip Tutorial
+
+On first visit, the tutorial appears automatically. **Tour** in the header restarts it. Choose **Enable voice**, allow microphone access, and say exactly **“next”** or **“skip”**. “Next” advances one tooltip; on the final tooltip it finishes the tutorial. “Skip” dismisses the whole tutorial and remembers that choice on this browser. Buttons provide the same controls when voice is unavailable or permission is denied.
+
+During the tour, bare next/skip work even with wake phrase, confidence filtering, push-to-talk, or Dictation only enabled. Other speech is ignored so instructions cannot accidentally become bubbles. Tour voice temporarily listens hands-free after explicit permission; normal voice settings resume when the tour closes. If the tour enabled a previously off microphone, it turns that microphone off on completion or skip.
+
+Suggested checks: advance through all 11 steps by voice, skip midway, restart with Tour, try Back and Next buttons, deny microphone permission and continue with buttons, and verify your existing bubbles and connections are unchanged. Say “next idea” to verify partial matches do not advance the tutorial.
+
 ## Workspace and Input Modes
 
 The microphone starts **off**. Click the microphone button in the capture bar to enable it and allow browser permission. You can also type commands in the capture bar without enabling the microphone.
