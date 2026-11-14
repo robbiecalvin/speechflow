@@ -61,6 +61,13 @@ Expected: transcript panel shows command preview.
 Expected: selects bubble index 3 and centers camera on it.
 
 ### Connect Mode
+
+Say `connect mode` or `connected mode` to enter a persistent connection-only mode. Repeating the entry phrase keeps it enabled. While active, speech, typing, Add Bubble, templates, duplicate, paste, and frame creation cannot create new bubbles. Tool shortcuts cannot silently exit it. Undo and redo are paused until you end the mode.
+
+Say `connect bubbles 1 and 2` (or `connect bubbles one and two`) to immediately draw a directed connection between existing bubbles. The mode stays active after connecting. Invalid, identical, and duplicate endpoints leave the map unchanged. Connection and exit commands remain available even if the input preference was Dictation only.
+
+Say **`end connected mode`** or **`end connect mode`** to resume creating bubbles. An explicit End connect mode button is also available in the capture bar. Legacy off/stop phrases below still work.
+
 - `connect mode`
 - `toggle connect mode`
 - `connect mode on`
@@ -70,7 +77,7 @@ Expected: selects bubble index 3 and centers camera on it.
 - `disable connect mode`
 - `stop connect mode`
 
-Expected: toggles or explicitly sets connect mode.
+Expected: entry phrases enable connect mode; explicit end/off/stop phrases disable it.
 
 ### Clear Map (Destructive, Confirmed)
 - `clear`

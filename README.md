@@ -33,6 +33,8 @@ The capture bar accepts text and commands. **Smart input** understands both; **D
 
 Use **Commands** or Ctrl/Cmd+K to search and run commands. Try `task Ship the MVP`, `connect bubble one to bubble two`, `zoom in`, `fit map`, `arrange map`, or `present mode`. Destructive commands ask for confirmation. Numbering follows the thought list.
 
+Connect mode pauses all bubble creation until you say `end connected mode` or use the explicit End connect mode button. Say `connect bubbles 1 and 2` to draw a connection and remain in connect mode.
+
 Starter templates create an editable project plan, decision map, or brainstorm. Arrange tidies unlocked thoughts into a grid and supports undo. Fit changes only the camera. Image export captures the entire map, including labeled directed connections, as a PNG (up to 4096 pixels per side). Thoughts and map history stay in browser storage on the current device; export JSON to keep a portable backup.
 
 ## Validation

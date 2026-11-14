@@ -45,3 +45,11 @@ test('playback can start without enabling the microphone',()=>{
   machine.transition('speaking');machine.transition('paused');machine.transition('speaking');machine.transition('idle');
   assert.equal(machine.getState().state,'idle');
 });
+test('connect mode uses explicit entry and exit phrases and accepts plural connections',()=>{
+  const parser=core().voiceParser;
+  for(const phrase of ['connect mode','connected mode','start connected mode','connect mode on']) assert.equal(parser.parseVoiceInput(phrase).intent,'set_connect_mode_on',phrase);
+  for(const phrase of ['end connected mode','end connect mode','stop connected mode']) assert.equal(parser.parseVoiceInput(phrase).intent,'set_connect_mode_off',phrase);
+  for(const phrase of ['connect bubbles 1 and 2','connect bubbles one and two','connect bubble one to bubble two','connect 1 and 2']) {
+    const parsed=parser.parseVoiceInput(phrase);assert.equal(parsed.intent,'connect_bubbles',phrase);assert.equal(parsed.args.from,0);assert.equal(parsed.args.to,1);
+  }
+});

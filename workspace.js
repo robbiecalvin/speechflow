@@ -149,6 +149,16 @@
   function submit(raw) {
     const text = String(raw || '').trim(); if (!text) return false;
     const parsed = voiceParserModule.parseVoiceInput(text);
+    const connectControl = ['set_connect_mode_on', 'set_connect_mode_off', 'toggle_connect_mode'].includes(parsed.intent);
+    if (connectControl || (isConnectMode && parsed.intent === 'connect_bubbles')) {
+      voiceRouter.route(text);
+      return true;
+    }
+    const createsBubble = parsed.mode === 'dictation' || parsed.intent === 'add_bubble' || /^set_(question|task|note|blocker|idea)_intent$/.test(parsed.intent);
+    if (isConnectMode && (createsBubble || voiceInputMode === 'dictation')) {
+      blockCreationInConnectMode();
+      return false;
+    }
     if (voiceInputMode === 'commands' && parsed.mode !== 'command') { notify('Command not recognized. Open Commands to find a phrase.'); return false; }
     if (parsed.mode === 'command' && voiceInputMode !== 'dictation') notify(`Command: ${text}`);
     if (voiceInputMode === 'dictation') { lastSpokenIntent = 'idea'; createBubbleFromVoiceTranscript(text); }
@@ -198,7 +208,7 @@
     brainstorm: [['The big idea', 'idea'], ['What if we tried…', 'idea'], ['A different perspective', 'question'], ['The next small step', 'task']]
   };
   document.querySelectorAll('[data-template]').forEach(btn => btn.onclick = () => {
-    if (bubbles.length) return;
+    if (blockCreationInConnectMode() || bubbles.length) return;
     const center = getWorkspaceCenterWorld();
     const nodes = templates[btn.dataset.template].map(([text,type],i) => createBubble(text, center.x-200+(i%2)*270, center.y-170+Math.floor(i/2)*190,type));
     nodes.slice(1).forEach(node => addConnection(nodes[0], node)); updateSidebar(); saveSnapshot(); fit(); notify('A starting point, ready to make your own.');
@@ -221,10 +231,21 @@
   let resizeTimer;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (bubbles.length) fit(); }, 100); });
   if (bubbles.length) fit();
+  const connectBanner = document.createElement('div');
+  connectBanner.id = 'connectModeBanner';
+  connectBanner.className = 'connect-mode-banner hidden';
+  connectBanner.setAttribute('role', 'status');
+  connectBanner.innerHTML = '<span><strong>Connect mode</strong> · “connect bubbles 1 and 2”<small>Creation paused until you say “end connected mode”.</small></span><button type="button">End connect mode</button>';
+  $('captureDock').prepend(connectBanner);
+  connectBanner.querySelector('button').onclick = () => setConnectModeFromVoice(false);
   let lastState = '';
   setInterval(() => {
-    const state = `${bubbles.length}|${connections.length}|${mapName}|${zoom}|${activeTool}`;
+    const state = `${bubbles.length}|${connections.length}|${mapName}|${zoom}|${activeTool}|${isConnectMode}`;
     if (state !== lastState) {
+      connectBanner.classList.toggle('hidden', !isConnectMode);
+      $('quickCapture').placeholder = isConnectMode ? 'Connect bubbles 1 and 2…' : 'An idea, a question, a what if…';
+      $('voiceInputMode').disabled = isConnectMode;
+      ['addBubbleBtn','generateFromPrompt','duplicateSelectionBtn','pasteSelectionBtn','frameSelectionBtn','undoBtn','redoBtn'].forEach(id => { if ($(id)) $(id).disabled = isConnectMode; });
       $('workspaceTitle').textContent = mapName; $('zoomValue').textContent = `${Math.round(zoom*100)}%`;
       $('mapStats').textContent = `${bubbles.length} thought${bubbles.length===1?'':'s'} · ${connections.length} connection${connections.length===1?'':'s'}`;
       $('welcomeCard').classList.toggle('hidden', bubbles.length > 0);
@@ -234,5 +255,5 @@
     $('microphoneToggle').classList.toggle('listening', microphoneEnabled && lastKnownVoiceState==='listening');
   }, 200);
   document.body.dataset.workspaceMode = mode;
-  window.SpeechFlowWorkspace = { submit, fit, arrange, exportImage, zoom:changeZoom, setMode, navigate, connect, openCommands };
+  window.SpeechFlowWorkspace = { submit, fit, arrange, exportImage, notify, zoom:changeZoom, setMode, navigate, connect, openCommands };
 })();

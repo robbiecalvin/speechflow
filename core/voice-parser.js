@@ -11,7 +11,7 @@
 
   const COMMAND_REFERENCE = [
     { intent: 'arrange_map', phrases: ['arrange map', 'tidy up'] },
-    { intent: 'connect_bubbles', phrases: ['connect bubble 1 to bubble 2'] },
+    { intent: 'connect_bubbles', phrases: ['connect bubbles 1 and 2', 'connect bubble 1 to bubble 2'] },
     { intent: 'set_tool', phrases: ['select tool', 'pan tool', 'connect tool'] },
     { intent: 'zoom', phrases: ['zoom in', 'zoom out'] },
     { intent: 'fit_map', phrases: ['fit map', 'fit to screen'] },
@@ -19,9 +19,9 @@
     { intent: 'navigate', phrases: ['next bubble', 'previous bubble'] },
     { intent: 'voice_help', phrases: ['help', 'voice help', 'command list', 'what can i say'] },
     { intent: 'select_bubble', phrases: ['bubble 3', 'select bubble 3', 'focus bubble 3', 'go to bubble 3'] },
-    { intent: 'toggle_connect_mode', phrases: ['connect mode', 'toggle connect mode'] },
+    { intent: 'set_connect_mode_on', phrases: ['connect mode', 'connected mode', 'start connected mode'] },
     { intent: 'set_connect_mode_on', phrases: ['connect mode on', 'enable connect mode', 'start connect mode'] },
-    { intent: 'set_connect_mode_off', phrases: ['connect mode off', 'disable connect mode', 'stop connect mode'] },
+    { intent: 'set_connect_mode_off', phrases: ['end connected mode', 'end connect mode', 'connect mode off', 'stop connect mode'] },
     { intent: 'clear_map', phrases: ['clear', 'clear map', 'reset map'] },
     { intent: 'start_playback', phrases: ['play', 'start playback', 'play map'] },
     { intent: 'stop_playback', phrases: ['stop', 'stop playback'] },
@@ -92,9 +92,9 @@
   function parseCommandAliases(compact, normalized) {
     const aliases = [
       { intent: 'voice_help', values: ['help', 'voice help', 'command list', 'commands', 'what can i say'] },
-      { intent: 'toggle_connect_mode', values: ['connect mode', 'toggle connect mode'] },
+      { intent: 'set_connect_mode_on', values: ['connect mode', 'connected mode', 'start connected mode', 'enable connected mode', 'toggle connect mode'] },
       { intent: 'set_connect_mode_on', values: ['connect mode on', 'enable connect mode', 'start connect mode'] },
-      { intent: 'set_connect_mode_off', values: ['connect mode off', 'disable connect mode', 'stop connect mode'] },
+      { intent: 'set_connect_mode_off', values: ['end connected mode', 'end connect mode', 'stop connected mode', 'disable connected mode', 'connect mode off', 'disable connect mode', 'stop connect mode'] },
       { intent: 'clear_map', values: ['clear', 'clear map', 'reset map'] },
       { intent: 'start_playback', values: ['play', 'start playback', 'playback start', 'play map'] },
       { intent: 'stop_playback', values: ['stop', 'stop playback', 'playback stop'] },
@@ -143,7 +143,7 @@
 
     const numbers = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
     const numbered = compact.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/g, word => numbers[word]);
-    const link = numbered.match(/^connect (?:bubble )?(\d+) to (?:bubble )?(\d+)$/);
+    const link = numbered.match(/^connect (?:bubbles? )?(\d+) (?:to|and) (?:bubble )?(\d+)$/);
     if (link) return makeCommand('connect_bubbles', {from:Number(link[1])-1, to:Number(link[2])-1}, normalized);
     if (['arrange map','tidy up'].includes(compact)) return makeCommand('arrange_map', {}, normalized);
     const tool = compact.match(/^(select|pan|connect) tool$/);

@@ -635,6 +635,7 @@ function closePromptModal() {
 }
 
 function createFromPromptText(prompt) {
+  if (blockCreationInConnectMode()) return null;
   const text = (prompt || '').trim();
   if (!text) {
     promptModalError.textContent = 'Type something first.';
@@ -1147,7 +1148,20 @@ function setToolbarStatus(message) {
   toolbarStatusEl.textContent = message;
 }
 
+function blockCreationInConnectMode() {
+  if (!isConnectMode) return false;
+  const message = 'Connect mode is active. Say “connect bubbles 1 and 2” to connect, or “end connected mode” to create bubbles again.';
+  updateVoiceTranscriptDisplay(message);
+  window.SpeechFlowWorkspace?.notify(message);
+  return true;
+}
+
 function setActiveTool(tool) {
+  if (isConnectMode && tool !== 'connect') {
+    blockCreationInConnectMode();
+    return;
+  }
+  if (tool === 'connect') isConnectMode = true;
   if (selectedBubble?.el) selectedBubble.el.style.outline = '';
   activeTool = tool;
   if (toolSelectBtn) toolSelectBtn.classList.toggle('active', tool === 'select');
@@ -1211,6 +1225,7 @@ function deleteSelection() {
 }
 
 function duplicateSelection() {
+  if (blockCreationInConnectMode()) return null;
   const selection = multiSelection.size > 0 ? Array.from(multiSelection) : activeBubble ? [activeBubble] : [];
   if (!selection.length) return;
 
@@ -1400,6 +1415,7 @@ function cutSelectionToClipboard() {
 }
 
 function pasteClipboard() {
+  if (blockCreationInConnectMode()) return null;
   if (!clipboardSnapshot?.nodes?.length) return;
   const offset = 48;
   const created = [];
@@ -1461,6 +1477,7 @@ function ungroupSelection() {
 }
 
 function createFrameFromSelection() {
+  if (blockCreationInConnectMode()) return null;
   const nodes = getSelectionNodes();
   if (!nodes.length) return;
   const minX = Math.min(...nodes.map((node) => node.x));
@@ -1771,6 +1788,7 @@ function transitionVoiceStateSafe(nextState, meta) {
 }
 
 function createBubbleFromVoiceTranscript(rawTranscript) {
+  if (blockCreationInConnectMode()) return null;
   if (!rawTranscript) return;
   let transcript = rawTranscript.trim();
   if (!transcript) return;
@@ -1884,11 +1902,15 @@ function selectBubbleByIndex(targetIndex) {
 }
 
 function setConnectModeFromVoice(enabled) {
+  if (selectedBubble?.el) selectedBubble.el.style.outline = '';
   isConnectMode = !!enabled;
   selectedBubble = null;
+  pendingConnectionFrom = null;
   if (enabled) setActiveTool('connect');
   else if (activeTool === 'connect') setActiveTool('select');
-  updateVoiceTranscriptDisplay(`Connect mode ${isConnectMode ? 'enabled' : 'disabled'}.`);
+  const message = isConnectMode ? 'Connect mode active. Say “connect bubbles 1 and 2”. Say “end connected mode” to create bubbles again.' : 'Connect mode ended. You can create bubbles again.';
+  updateVoiceTranscriptDisplay(message);
+  window.SpeechFlowWorkspace?.notify(message);
 }
 
 function toggleConnectModeFromVoice() {
@@ -2607,7 +2629,7 @@ function enableDragging(el, data) {
   let activeTouchId = null;
 
   function startDrag(clientX, clientY) {
-    if (activeTool === 'pan') return;
+    if (activeTool === 'pan' || isConnectMode) return;
     isDragging = true;
     data.dragging = true;
     const groupedTargets = data.groupId
@@ -2896,6 +2918,7 @@ function updateBubbleIds() {
 
 
 function undo() {
+  if (blockCreationInConnectMode()) return;
   if (undoStack.length <= 1) return;
   const snap = undoStack.pop();
   redoStack.push(snap);
@@ -2905,6 +2928,7 @@ function undo() {
 }
 
 function redo() {
+  if (blockCreationInConnectMode()) return;
   if (redoStack.length === 0) return;
   const snap = redoStack.pop();
   undoStack.push(snap);
@@ -3277,6 +3301,7 @@ if (audioSingleToggle) {
 }
 
 function createBubble(text, x, y, type = 'idea') {
+  if (blockCreationInConnectMode()) return null;
   const bubble = document.createElement('div');
   bubble.className = `bubble ${type}`;
   bubble.style.position = 'absolute';
