@@ -5,6 +5,30 @@ This guide reflects the currently implemented parser/router behavior in:
 - `core/voice-router.js`
 - `script.js`
 
+## Workspace and Input Modes
+
+The microphone starts **off**. Click the microphone button in the capture bar to enable it and allow browser permission. You can also type commands in the capture bar without enabling the microphone.
+
+- **Smart input** routes commands and captures unmatched speech as thoughts.
+- **Dictation only** captures every phrase as text; it does not execute commands.
+- **Commands only** rejects unmatched phrases with feedback.
+
+Use Commands or Ctrl/Cmd+K for a searchable command list. Escape closes it and restores focus.
+
+Additional commands:
+
+| Phrase | Expected behavior |
+| --- | --- |
+| `connect bubble one to bubble two` | Creates a directed connection; rejects missing, duplicate, or identical endpoints |
+| `select tool`, `pan tool`, `connect tool` | Changes the canvas tool |
+| `zoom in`, `zoom out` | Changes camera scale |
+| `fit map`, `fit to screen` | Fits all thoughts without moving them |
+| `arrange map`, `tidy up` | Arranges unlocked thoughts; supports undo |
+| `explore mode`, `capture mode`, `present mode` | Changes workspace mode |
+| `next bubble`, `previous bubble` | Selects and centers the next or previous thought |
+
+Selection and connection numbers accept digits and the words one through ten. Typed prefixes and add-bubble commands preserve capitalization in the captured text. A wake phrase must match a complete word, so the wake phrase `flow` does not match `flower`.
+
 ## Runtime Preconditions
 - If **wake phrase mode** is enabled, every spoken command must start with your configured wake phrase.
   - Example with wake phrase `speechflow`: `speechflow connect mode`

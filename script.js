@@ -1,4 +1,6 @@
 let activeBubble = null;
+let microphoneEnabled = false;
+let voiceInputMode = 'smart';
 const sidebarEl = document.getElementById('sidebar');
 const speechFlowCore = window.SpeechFlowCore || {};
 const stateModule = speechFlowCore.state;
@@ -32,25 +34,22 @@ const WORKSPACE_MIN_HEIGHT = 2200;
 const WORKSPACE_PADDING = 400;
 
 function getWorkspaceSurfaceSize() {
-  const viewportWidth = Math.max(getWorkspaceWidth(), 1);
-  const viewportHeight = Math.max(window.innerHeight, 1);
+  return { width: Math.max(getWorkspaceWidth(), 1), height: window.innerHeight };
+}
 
-  let maxProjectedX = viewportWidth;
-  let maxProjectedY = viewportHeight;
-
-  if (Array.isArray(bubbles) && bubbles.length) {
-    bubbles.forEach((bubble) => {
-      const projectedX = (bubble.x - camX) * zoom + 320;
-      const projectedY = (bubble.y - camY) * zoom + 220;
-      if (projectedX > maxProjectedX) maxProjectedX = projectedX;
-      if (projectedY > maxProjectedY) maxProjectedY = projectedY;
-    });
+function getCapturePosition() {
+  const center = getWorkspaceCenterWorld();
+  for (let ring = 0; ring < 50; ring++) {
+    for (let col = -ring; col <= ring; col++) {
+      for (let row = -ring; row <= ring; row++) {
+        if (ring && Math.abs(col) !== ring && Math.abs(row) !== ring) continue;
+        const x = center.x - 90 + col * 240;
+        const y = center.y - 100 + row * 150;
+        if (!bubbles.some(b => x < b.x + b.width + 30 && x + 210 > b.x && y < b.y + b.height + 30 && y + 120 > b.y)) return {x,y};
+      }
+    }
   }
-
-  return {
-    width: Math.max(WORKSPACE_MIN_WIDTH, viewportWidth * 2, maxProjectedX + WORKSPACE_PADDING),
-    height: Math.max(WORKSPACE_MIN_HEIGHT, viewportHeight * 2, maxProjectedY + WORKSPACE_PADDING)
-  };
+  return {x:center.x, y:center.y};
 }
 
 function getWorkspaceCenterWorld() {
@@ -72,10 +71,6 @@ function clampBubbleToWorkspace(data) {
 
 function clampCameraToWorkspace() {
   if (!bubbles.length) return;
-  const leftmostBubbleX = Math.min(...bubbles.map((b) => b.x));
-  if (camX > leftmostBubbleX) {
-    camX = leftmostBubbleX;
-  }
   if (stateModule?.setZoomState) {
     stateModule.setZoomState({ x: camX, y: camY, zoom });
   }
@@ -357,7 +352,7 @@ function isAnyModalOpen() {
 function updateVoiceModeHint() {
   if (!voiceModeHintEl) return;
   const modeParts = [];
-  modeParts.push(voiceSettings.pushToTalkEnabled ? 'Push-to-talk (hold Space)' : 'Always listening');
+  modeParts.push(!microphoneEnabled ? 'Microphone off' : voiceSettings.pushToTalkEnabled ? 'Push-to-talk (hold Space)' : 'Hands-free listening');
   if (voiceSettings.wakePhraseEnabled) {
     modeParts.push(`Wake phrase: "${voiceSettings.wakePhrase}"`);
   } else {
@@ -1652,7 +1647,7 @@ function getBubbleAtPoint(clientX, clientY) {
 
 window.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
-  if (e.target.closest('#sidebar')) return;
+  if (e.target.closest('#sidebar, #workspaceShell, .modal')) return;
   if (e.target.closest('.bubble-connector')) return;
   const canPan = activeTool === 'pan';
   if (activeTool === 'select' && !e.target.closest('.bubble')) {
@@ -1704,7 +1699,7 @@ window.addEventListener('mousemove', (e) => {
   clampCameraToWorkspace();
 });
 function handleWorkspaceWheelZoom(e) {
-  if (e.target.closest('#sidebar')) return;
+  if (e.target.closest('#sidebar, #workspaceShell, .modal')) return;
   e.preventDefault();
   const scale = -e.deltaY * 0.001;
   const prevZoom = zoom;
@@ -1796,11 +1791,8 @@ function createBubbleFromVoiceTranscript(rawTranscript) {
     x = pos.x;
     y = pos.y;
   } else {
-    const canvasWidth = getWorkspaceWidth();
-    x = camX + Math.random() * Math.max(canvasWidth - 100, 1);
-    y = camY + Math.random() * (window.innerHeight - 100);
+    ({x, y} = getCapturePosition());
   }
-  x = Math.max(x, camX);
 
   const bubble = document.createElement('div');
   bubble.style.position = 'absolute';
@@ -1874,10 +1866,12 @@ function createBubbleFromVoiceTranscript(rawTranscript) {
       addConnection(pendingConnectionFrom, data, { label: '', type: 'dependency' });
       pendingConnectionFrom = null;
       bubble.style.opacity = 1;
+      saveSnapshot();
     }, 300);
     return;
   }
   bubble.style.opacity = 1;
+  saveSnapshot();
 }
 
 function selectBubbleByIndex(targetIndex) {
@@ -1970,8 +1964,8 @@ function stripWakePhraseIfNeeded(rawTranscript) {
   const wakePhrase = normalizeWakePhraseInput(voiceSettings.wakePhrase);
   if (!wakePhrase) return '';
   const lowered = transcript.toLowerCase();
-  if (!lowered.startsWith(wakePhrase)) return '';
-  return transcript.slice(wakePhrase.length).trim();
+  if (!lowered.startsWith(wakePhrase) || (lowered.length > wakePhrase.length && !/[\s,.:!?]/.test(lowered[wakePhrase.length]))) return '';
+  return transcript.slice(wakePhrase.length).replace(/^[\s,.:!?]+/, '').trim();
 }
 
 function applyVoiceSettingsToForm() {
@@ -2055,7 +2049,10 @@ const voiceRouter = voiceRouterModule?.createVoiceRouter && voiceParserModule?.p
   ? voiceRouterModule.createVoiceRouter({
     parser: voiceParserModule,
     confirmDestructive: (parsed) => confirm(getDestructiveVoiceConfirmMessage(parsed)),
-    onSelectBubble: (args) => selectBubbleByIndex(args.bubbleIndex),
+    onSelectBubble: (args) => {
+      if (!bubbles[args.bubbleIndex]) { updateVoiceTranscriptDisplay('That thought number does not exist.'); return; }
+      selectBubbleByIndex(args.bubbleIndex);
+    },
     onToggleConnectMode: () => toggleConnectModeFromVoice(),
     onSetConnectModeOn: () => setConnectModeFromVoice(true),
     onSetConnectModeOff: () => setConnectModeFromVoice(false),
@@ -2074,7 +2071,14 @@ const voiceRouter = voiceRouterModule?.createVoiceRouter && voiceParserModule?.p
     onOpenPromptModal: () => openPromptModal(),
     onOpenVoiceSettings: () => openVoiceSettingsModal(),
     onCloseVoiceSettings: () => closeVoiceSettingsModal(),
-    onVoiceHelp: () => showVoiceHelpFromVoice(),
+    onVoiceHelp: () => window.SpeechFlowWorkspace?.openCommands(),
+    onArrangeMap: () => window.SpeechFlowWorkspace?.arrange(),
+    onSetTool: (args) => setActiveTool(args.tool),
+    onZoom: (args) => window.SpeechFlowWorkspace?.zoom(args.direction),
+    onFitMap: () => window.SpeechFlowWorkspace?.fit(),
+    onSetMode: (args) => window.SpeechFlowWorkspace?.setMode(args.mode),
+    onNavigate: (args) => window.SpeechFlowWorkspace?.navigate(args.direction),
+    onConnectBubbles: (args) => window.SpeechFlowWorkspace?.connect(args.from, args.to),
     onTypedIntent: (intentName) => {
       applyTypedIntent(intentName);
     },
@@ -2099,6 +2103,7 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
         recoverable: true,
         restart: true
       },
+    shouldAcceptResult: () => microphoneEnabled && !playbackActive && !isAnyModalOpen(),
     onResult: (transcript, event) => {
       if (isAnyModalOpen()) {
         updateVoiceTranscriptDisplay('Voice input paused while a modal is open.');
@@ -2113,6 +2118,10 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
       const routedTranscript = stripWakePhraseIfNeeded(transcript);
       if (voiceSettings.wakePhraseEnabled && !routedTranscript) {
         updateVoiceTranscriptDisplay('Wake phrase required.');
+        return;
+      }
+      if (window.SpeechFlowWorkspace) {
+        window.SpeechFlowWorkspace.submit(routedTranscript);
         return;
       }
       if (voiceRouter) {
@@ -2137,7 +2146,8 @@ function applyVoiceSettingsRuntime() {
     updateVoiceModeHint();
     return;
   }
-  voiceRecognitionController.startListening();
+  if (microphoneEnabled) voiceRecognitionController.startListening();
+  else transitionVoiceStateSafe(voiceStateMachine.STATES.IDLE);
   updateVoiceModeHint();
 }
 
@@ -2180,6 +2190,7 @@ function speakText(text) {
 
 
 let playbackActive = false;
+let playbackTimer = null;
 let playbackPaused = false;
 let playbackIndex = 0;
 let orderedPlayback = [];
@@ -2226,6 +2237,7 @@ if (snapToGridInput) {
 
 function startPlayback() {
   if (!bubbles.length) return;
+  if (playbackActive) stopPlayback();
   transitionVoiceStateSafe(voiceStateMachine.STATES.SPEAKING, { source: 'start_playback' });
   playbackActive = true;
   playbackPaused = false;
@@ -2254,12 +2266,15 @@ function startPlayback() {
 }
 
 function stopPlayback() {
+  isAutoPanning = false;
+  clearTimeout(playbackTimer);
+  bubbles.forEach(b => { b.visible = true; b.el.style.display = 'block'; b.el.style.opacity = 1; });
   playbackActive = false;
   playbackPaused = false;
   orderedPlayback = [];
   playbackIndex = 0;
   window.speechSynthesis.cancel();
-  transitionVoiceStateSafe(voiceStateMachine.STATES.LISTENING, { source: 'stop_playback' });
+  transitionVoiceStateSafe(microphoneEnabled ? voiceStateMachine.STATES.LISTENING : voiceStateMachine.STATES.IDLE, { source: 'stop_playback' });
   collapsedAudioStep = 0;
   updateAudioControlsUI();
 }
@@ -2267,6 +2282,7 @@ function stopPlayback() {
 function pausePlayback() {
   if (!playbackActive || playbackPaused) return;
   playbackPaused = true;
+  clearTimeout(playbackTimer);
   window.speechSynthesis.pause();
   transitionVoiceStateSafe(voiceStateMachine.STATES.PAUSED, { source: 'pause_playback' });
   collapsedAudioStep = 2;
@@ -2280,7 +2296,7 @@ function resumePlayback() {
   transitionVoiceStateSafe(voiceStateMachine.STATES.SPEAKING, { source: 'resume_playback' });
   collapsedAudioStep = 3;
   updateAudioControlsUI();
-  playNextBubble();
+  playbackTimer = setTimeout(playNextBubble, 3000);
 }
 
 function playNextBubble() {
@@ -2300,8 +2316,8 @@ function playNextBubble() {
 
   panToTarget(b.x - getWorkspaceWidth() / 2 / zoom, b.y - window.innerHeight / 2 / zoom);
 
-  setTimeout(() => {
-    if (!playbackPaused) {
+  playbackTimer = setTimeout(() => {
+    if (playbackActive && !playbackPaused) {
       playNextBubble();
     }
   }, 3000);
@@ -2371,9 +2387,9 @@ function ensureEdgeMetadata(conn) {
 
 function getEdgeBend(conn, fromX, fromY, toX, toY) {
   const metadata = ensureEdgeMetadata(conn);
-  if (!Number.isFinite(metadata.bendX)) metadata.bendX = (fromX + toX) / 2;
-  if (!Number.isFinite(metadata.bendY)) metadata.bendY = (fromY + toY) / 2;
-  return { bendX: metadata.bendX, bendY: metadata.bendY };
+  const bendX = Number.isFinite(metadata.bendX) ? (metadata.bendX - camX) * zoom : (fromX + toX) / 2;
+  const bendY = Number.isFinite(metadata.bendY) ? (metadata.bendY - camY) * zoom : (fromY + toY) / 2;
+  return { bendX, bendY, orientation: metadata.orientation === 'horizontal' ? 'horizontal' : 'vertical' };
 }
 
 function drawOrthogonalEdge(conn, fromX, fromY, toX, toY, drawContext) {
@@ -2401,10 +2417,10 @@ clickLayer.addEventListener('mousedown', (e) => {
   const y = e.clientY - rect.top;
   for (const conn of connections) {
     if (!(conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y))) continue;
-    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
-    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
-    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
-    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
+    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth * zoom / 2;
+    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight * zoom / 2;
+    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth * zoom / 2;
+    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight * zoom / 2;
     const { bendX, bendY, orientation } = getEdgeBend(conn, fromX, fromY, toX, toY);
     const distSq = (x - bendX) ** 2 + (y - bendY) ** 2;
     if (getEdgeRoutingMode(conn) === 'orthogonal' && distSq <= 121) {
@@ -2452,9 +2468,9 @@ window.addEventListener('mousemove', (event) => {
   const conn = draggingEdgeBend.conn;
   const metadata = ensureEdgeMetadata(conn);
   if (draggingEdgeBend.orientation === 'vertical') {
-    metadata.bendX = event.clientX - getSidebarWidth();
+    metadata.bendX = camX + (event.clientX - getSidebarWidth()) / zoom;
   } else {
-    metadata.bendY = event.clientY;
+    metadata.bendY = camY + event.clientY / zoom;
   }
 });
 
@@ -2484,16 +2500,16 @@ function animate() {
 
   connections.forEach((conn) => {
     if (!conn.from.visible || !conn.to.visible) return;
-    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
-    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
-    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
-    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
+    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth * zoom / 2;
+    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight * zoom / 2;
+    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth * zoom / 2;
+    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight * zoom / 2;
     const midX1 = fromX + (toX - fromX) * 0.25;
     const midY1 = fromY - 50 * zoom;
     const midX2 = toX - (toX - fromX) * 0.25;
     const midY2 = toY - 50 * zoom;
 
-    ctx.strokeStyle = conn === selectedEdge ? '#f24e1e' : 'rgba(0,0,0,1)';
+    ctx.strokeStyle = conn === selectedEdge ? '#23634c' : '#a6b6a0';
     if (getEdgeRoutingMode(conn) === 'orthogonal') {
       const bend = drawOrthogonalEdge(conn, fromX, fromY, toX, toY, ctx);
       if (conn === selectedEdge) {
@@ -2516,8 +2532,8 @@ function animate() {
   });
 
   if (connectorDragState) {
-    const fromX = (connectorDragState.from.x - camX) * zoom + connectorDragState.from.el.offsetWidth / 2;
-    const fromY = (connectorDragState.from.y - camY) * zoom + connectorDragState.from.el.offsetHeight / 2;
+    const fromX = (connectorDragState.from.x - camX) * zoom + connectorDragState.from.el.offsetWidth * zoom / 2;
+    const fromY = (connectorDragState.from.y - camY) * zoom + connectorDragState.from.el.offsetHeight * zoom / 2;
     const toX = connectorDragState.currentX - getSidebarWidth();
     const toY = connectorDragState.currentY;
     ctx.strokeStyle = '#f24e1e';
@@ -2545,10 +2561,10 @@ function animate() {
 
   connections.forEach((conn) => {
     if (!conn.from.visible || !conn.to.visible) return;
-    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth / 2;
-    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight / 2;
-    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth / 2;
-    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight / 2;
+    const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth * zoom / 2;
+    const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight * zoom / 2;
+    const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth * zoom / 2;
+    const toY = (conn.to.y - camY) * zoom + conn.to.el.offsetHeight * zoom / 2;
     const midX1 = fromX + (toX - fromX) * 0.25;
     const midY1 = fromY - 50 * zoom;
     const midX2 = toX - (toX - fromX) * 0.25;
@@ -2756,6 +2772,8 @@ function getStateSnapshot() {
 }
 
 function restoreStateFromSnapshot(snapshot) {
+  activeBubble = null;
+  selectedBubble = null;
   const state = persistenceModule?.parseSnapshot
     ? persistenceModule.parseSnapshot(snapshot)
     : JSON.parse(snapshot);
@@ -2822,7 +2840,7 @@ data.idLabel = idLabel;
 
 
 
-    if (b.order !== null) bubble.classList.add('locked');
+    bubble.classList.toggle('locked', !!data.locked);
 
 attachBubbleDblClickHandler(bubble, data);
 updateSidebar();
@@ -2883,6 +2901,7 @@ function undo() {
   redoStack.push(snap);
   restoreStateFromSnapshot(undoStack[undoStack.length - 1]);
   localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  upsertCurrentMapRecord();
 }
 
 function redo() {
@@ -2891,9 +2910,14 @@ function redo() {
   undoStack.push(snap);
   restoreStateFromSnapshot(snap);
   localStorage.setItem('bubbleHistory', JSON.stringify(undoStack));
+  upsertCurrentMapRecord();
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && voiceSettingsModal && !voiceSettingsModal.classList.contains('hidden')) {
+    closeVoiceSettingsModal();
+    return;
+  }
   if (e.key === 'Escape' && bubbleEditorModal && !bubbleEditorModal.classList.contains('hidden')) {
     closeBubbleEditorModal();
     return;
@@ -2910,7 +2934,7 @@ window.addEventListener('keydown', (e) => {
     closePromptModal();
     return;
   }
-  if (isEditableTarget(e.target)) return;
+  if (isEditableTarget(e.target) || isAnyModalOpen()) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
     e.preventDefault();
     copySelectionToClipboard();
@@ -2983,7 +3007,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (!voiceSettings.pushToTalkEnabled) return;
+  if (!microphoneEnabled || !voiceSettings.pushToTalkEnabled) return;
   if (e.code !== 'Space') return;
   if (isEditableTarget(e.target)) return;
   if (isAnyModalOpen()) return;
@@ -2994,7 +3018,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 window.addEventListener('keyup', (e) => {
-  if (!voiceSettings.pushToTalkEnabled) return;
+  if (!microphoneEnabled || !voiceSettings.pushToTalkEnabled) return;
   if (e.code !== 'Space') return;
   if (isEditableTarget(e.target)) return;
   if (isAnyModalOpen()) return;
@@ -3144,87 +3168,15 @@ controlPanel.querySelector('#quickConnect').addEventListener('click', () => {
 });
 
 
-// Snap all bubbles to viewport center while preserving formation
-controlPanel.querySelector('#snapCenter').addEventListener('click', () => {
-  if (!bubbles.length) return;
-  const minX = Math.min(...bubbles.map((b) => b.x));
-  const maxX = Math.max(...bubbles.map((b) => b.x));
-  const minY = Math.min(...bubbles.map((b) => b.y));
-  const maxY = Math.max(...bubbles.map((b) => b.y));
-  const clusterCenterX = (minX + maxX) / 2;
-  const clusterCenterY = (minY + maxY) / 2;
-  const viewportCenterX = camX + getWorkspaceWidth() / 2 / zoom;
-  const viewportCenterY = camY + window.innerHeight / 2 / zoom;
-  const offsetX = viewportCenterX - clusterCenterX;
-  const offsetY = viewportCenterY - clusterCenterY;
-  bubbles.forEach((b) => {
-    b.x += offsetX;
-    b.y += offsetY;
-  });
-  if (activeBubble && graphModule?.getConnectedComponent && layoutModule?.getClusterBounds && cameraModule?.zoomToFitCluster) {
-    const clusterNodeIds = graphModule.getConnectedComponent(activeBubble.id, bubbles, connections);
-    const clusterBounds = layoutModule.getClusterBounds(bubbles, clusterNodeIds);
-    const nextView = cameraModule.zoomToFitCluster(clusterBounds, {
-      width: getWorkspaceWidth(),
-      height: window.innerHeight
-    }, 120);
-    if (nextView) {
-      camX = nextView.x;
-      camY = nextView.y;
-      zoom = cameraModule.clampZoom ? cameraModule.clampZoom(nextView.zoom, MIN_ZOOM, MAX_ZOOM) : nextView.zoom;
-    }
-  }
-  clampCameraToWorkspace();
-  saveSnapshot();
-});
+// Fit the camera without moving or mutating the map.
+controlPanel.querySelector('#snapCenter').addEventListener('click', () => window.SpeechFlowWorkspace?.fit());
 
-// Export image
-controlPanel.querySelector('#exportImageBtn').addEventListener('click', () => {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+// Export the whole graph, including directed connections.
+controlPanel.querySelector('#exportImageBtn').addEventListener('click', () => window.SpeechFlowWorkspace?.exportImage());
 
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  document.querySelectorAll('.bubble').forEach(bubble => {
-    const rect = bubble.getBoundingClientRect();
-    const style = getComputedStyle(bubble);
-
-    ctx.fillStyle = style.backgroundColor || '#000';
-    ctx.beginPath();
-    ctx.ellipse(
-      rect.left + rect.width / 2,
-      rect.top + rect.height / 2,
-      rect.width / 2,
-      rect.height / 2,
-      0, 0, 2 * Math.PI
-    );
-    ctx.fill();
-
-    const text = bubble.querySelector('.bubble-text')?.textContent || '';
-    ctx.fillStyle = style.color || '#fff';
-    ctx.font = '16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(
-      text,
-      rect.left + rect.width / 2,
-      rect.top + rect.height / 2 + 6
-    );
-  });
-
-  const link = document.createElement('a');
-  link.download = 'speechflow_map.png';
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-});
-
-// Add bubble at random position
+// Add a thought in the next available capture position
 controlPanel.querySelector('#addBubbleBtn').addEventListener('click', () => {
-  const x = camX + Math.random() * Math.max(getWorkspaceWidth() - 120, 1);
-  const y = camY + Math.random() * (window.innerHeight - 200);
+  const {x, y} = getCapturePosition();
   createBubble("New idea", x, y, 'idea');
   updateSidebar();
   saveSnapshot();
@@ -3325,7 +3277,6 @@ if (audioSingleToggle) {
 }
 
 function createBubble(text, x, y, type = 'idea') {
-  x = Math.max(x, camX);
   const bubble = document.createElement('div');
   bubble.className = `bubble ${type}`;
   bubble.style.position = 'absolute';

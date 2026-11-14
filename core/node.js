@@ -26,6 +26,11 @@
     return {
       id: source.id || generateNodeId(),
       text: String(source.text || '').trim() || 'New idea',
+      type: ['idea','task','question','blocker','note'].includes(source.type) ? source.type : 'idea',
+      shape: typeof source.shape === 'string' ? source.shape : 'rounded',
+      width: Number.isFinite(source.width) ? source.width : 180,
+      height: Number.isFinite(source.height) ? source.height : 90,
+      groupId: source.groupId || null,
       x: Number.isFinite(source.x) ? source.x : 0,
       y: Number.isFinite(source.y) ? source.y : 0,
       notes: String(source.notes || ''),

@@ -4,6 +4,13 @@
   const DESTRUCTIVE_INTENTS = new Set(['clear_map', 'delete_selected_bubble']);
 
   const INTENT_HANDLER_MAP = {
+    arrange_map: 'onArrangeMap',
+    connect_bubbles: 'onConnectBubbles',
+    set_tool: 'onSetTool',
+    zoom: 'onZoom',
+    fit_map: 'onFitMap',
+    set_mode: 'onSetMode',
+    navigate: 'onNavigate',
     select_bubble: 'onSelectBubble',
     toggle_connect_mode: 'onToggleConnectMode',
     set_connect_mode_on: 'onSetConnectModeOn',

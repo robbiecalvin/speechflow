@@ -10,6 +10,13 @@
   };
 
   const COMMAND_REFERENCE = [
+    { intent: 'arrange_map', phrases: ['arrange map', 'tidy up'] },
+    { intent: 'connect_bubbles', phrases: ['connect bubble 1 to bubble 2'] },
+    { intent: 'set_tool', phrases: ['select tool', 'pan tool', 'connect tool'] },
+    { intent: 'zoom', phrases: ['zoom in', 'zoom out'] },
+    { intent: 'fit_map', phrases: ['fit map', 'fit to screen'] },
+    { intent: 'set_mode', phrases: ['explore mode', 'capture mode', 'present mode'] },
+    { intent: 'navigate', phrases: ['next bubble', 'previous bubble'] },
     { intent: 'voice_help', phrases: ['help', 'voice help', 'command list', 'what can i say'] },
     { intent: 'select_bubble', phrases: ['bubble 3', 'select bubble 3', 'focus bubble 3', 'go to bubble 3'] },
     { intent: 'toggle_connect_mode', phrases: ['connect mode', 'toggle connect mode'] },
@@ -74,10 +81,10 @@
   }
 
   function parseTypePrefix(normalized) {
-    const match = normalized.compact.match(/^(question|task|note|blocker|idea)\s+(.+)$/);
+    const match = normalized.text.match(/^(question|task|note|blocker|idea)\s+(.+)$/i);
     if (!match) return null;
-    const keyword = match[1];
-    const remainder = normalized.text.slice(normalized.text.toLowerCase().indexOf(`${keyword} `) + keyword.length + 1).trim();
+    const keyword = match[1].toLowerCase();
+    const remainder = match[2].trim();
     const intent = TYPE_PREFIX_INTENTS[keyword];
     return makeCommand(intent, { remainder }, normalized);
   }
@@ -116,7 +123,7 @@
   }
 
   function parseAddBubbleWithText(normalized) {
-    const match = normalized.compact.match(/^(?:add|create)\s+bubble\s+(.+)$/);
+    const match = normalized.text.match(/^(?:add|create|new)\s+bubble\s+(.+)$/i);
     if (!match) return null;
     return makeCommand('add_bubble', { transcript: match[1] }, normalized);
   }
@@ -134,7 +141,19 @@
       };
     }
 
-    const selectBubbleCommand = parseSelectBubble(compact, normalized);
+    const numbers = {one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
+    const numbered = compact.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/g, word => numbers[word]);
+    const link = numbered.match(/^connect (?:bubble )?(\d+) to (?:bubble )?(\d+)$/);
+    if (link) return makeCommand('connect_bubbles', {from:Number(link[1])-1, to:Number(link[2])-1}, normalized);
+    if (['arrange map','tidy up'].includes(compact)) return makeCommand('arrange_map', {}, normalized);
+    const tool = compact.match(/^(select|pan|connect) tool$/);
+    if (tool) return makeCommand('set_tool', {tool:tool[1]}, normalized);
+    if (/^zoom (in|out)$/.test(compact)) return makeCommand('zoom', {direction:compact.endsWith('in') ? 1 : -1}, normalized);
+    if (['fit map','fit to screen','zoom to fit'].includes(compact)) return makeCommand('fit_map', {}, normalized);
+    const mode = compact.match(/^(explore|capture|present)(?: mode)?$/);
+    if (mode) return makeCommand('set_mode', {mode:mode[1]}, normalized);
+    if (['next bubble','previous bubble'].includes(compact)) return makeCommand('navigate', {direction:compact.startsWith('next') ? 1 : -1}, normalized);
+    const selectBubbleCommand = parseSelectBubble(numbered, normalized);
     if (selectBubbleCommand) return selectBubbleCommand;
 
     const addBubbleWithText = parseAddBubbleWithText(normalized);

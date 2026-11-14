@@ -47,6 +47,7 @@
 
     function bindRecognitionEvents() {
       recognition.onresult = (event) => {
+        if (stoppedByUser || (opts.shouldAcceptResult && !opts.shouldAcceptResult())) return;
         opts.voiceState.transition(opts.voiceState.STATES.PROCESSING, { source: 'onresult' });
         const lastIndex = event.results.length - 1;
         const transcript = event.results[lastIndex][0].transcript;
