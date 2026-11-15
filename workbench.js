@@ -43,7 +43,7 @@
   function result(status,message){SpeechFlowWorkspace.notify(message);showOutcome(message,status);return {status,message};}
   function fail(message){return result('error',message);}
   function success(message){return storageFailures.size?result('error',`${message} Browser storage is unavailable; download a backup to keep these changes.`):result('success',message);}
-  function showOutcome(message,status='info'){if(status==='error')$('commandReceipt').dataset.active='true';if(!inputActive)$('receiptHeard').textContent='Workspace update';$('receiptOutcome').textContent=message;$('commandReceipt').dataset.status=status;notificationVersion++;}
+  function showOutcome(message,status='info'){$('commandReceipt').dataset.active='true';if(!inputActive)$('receiptHeard').textContent='Workspace update';$('receiptOutcome').textContent=message;$('commandReceipt').dataset.status=status;notificationVersion++;}
   function heard(text,source='typed'){inputActive=true;$('commandReceipt').dataset.active='true';$('receiptHeard').textContent=`${source==='voice'?'Heard':'Entered'}: ${text}`;$('receiptOutcome').textContent='Working…';$('commandReceipt').dataset.status='pending';}
   function rename(index,text){
     if(isConnectMode)return fail('End connected mode before editing thoughts.');
@@ -158,6 +158,7 @@
     camX=node.x-(getWorkspaceWidth()/zoom-node.width)/2;camY=node.y-(innerHeight/zoom-node.height)/2;
     $('presentationPosition').textContent=`${position+1} / ${sequence.length} · ${getBubbleDisplayText(node).slice(0,45)}`;
     $('storyTitle').textContent=getBubbleDisplayText(node);$('storyNotes').textContent=node.notes||'Use the arrows to follow the connections in your map.';
+    document.dispatchEvent(new Event('speechflow:slide'));
   }
   const story=document.createElement('section');story.id='storyCaption';story.innerHTML='<span class="eyebrow">FOLLOW YOUR THINKING</span><h2 id="storyTitle"></h2><p id="storyNotes"></p>';
   $('workspaceShell').appendChild(story);
@@ -179,7 +180,7 @@
     }
   },true);
   setInterval(()=>{refreshInspector();inspectButton.classList.toggle('hidden',!activeBubble||!isBubbleColumnCollapsed);},250);
-  window.SpeechFlowWorkbench={heard,showOutcome,finishInput(){inputActive=false;},get notificationVersion(){return notificationVersion;},rename,changeType,labelConnection,setStart,applyLayout,downloadBackup,openBackups,checkpoint,presentationStart,navigate,refreshInspector};
+  window.SpeechFlowWorkbench={getPresentationState(){return {position,total:sequence.length};},heard,showOutcome,finishInput(){inputActive=false;},get notificationVersion(){return notificationVersion;},rename,changeType,labelConnection,setStart,applyLayout,downloadBackup,openBackups,checkpoint,presentationStart,navigate,refreshInspector};
   renderBackupStatus();
   if(startupRecoveryMessage){SpeechFlowWorkspace.notify(startupRecoveryMessage,'info');$('commandReceipt').dataset.active='true';$('receiptHeard').textContent='Session recovery';}
 })();

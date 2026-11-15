@@ -262,6 +262,7 @@
       document.querySelectorAll('[data-tool]').forEach(btn => btn.setAttribute('aria-pressed',String(btn.dataset.tool===activeTool)));
       lastState = state;
     }
+    window.SpeechFlowUI?.refreshActions();
     $('microphoneToggle').classList.toggle('listening', microphoneEnabled && lastKnownVoiceState==='listening');
   }, 200);
   document.body.dataset.workspaceMode = mode;

@@ -1,3 +1,4 @@
+const {click,reveal}=require('./ui-actions.cjs');
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
@@ -13,7 +14,7 @@ async function pageFor(t,viewport={width:1440,height:1000}){
 }
 async function enter(p,text){await p.locator('#quickCapture').fill(text);await p.locator('#captureForm').evaluate(f=>f.requestSubmit());}
 async function say(p,text){await p.evaluate(text=>testRecognition.onresult({results:[[{transcript:text,confidence:1}]]}),text);}
-async function download(p,selector){const pending=p.waitForEvent('download');await p.locator(selector).click();const file=await pending;return JSON.parse(await fs.readFile(await file.path(),'utf8'));}
+async function download(p,selector){const pending=p.waitForEvent('download');await click(p,selector);const file=await pending;return JSON.parse(await fs.readFile(await file.path(),'utf8'));}
 
 test('voice receipts show heard text, successful corrections, invalid targets, and cancelled actions',async t=>{
   const p=await pageFor(t);await enter(p,'First idea');await enter(p,'Second idea');await p.locator('#microphoneToggle').click();
@@ -80,9 +81,9 @@ test('presentation uses the chosen starting point, follows connections, and prot
 test('mobile inspector and backups remain accessible without header overflow',async t=>{
   const p=await pageFor(t,{width:390,height:844});await enter(p,'A mobile thought');await p.waitForTimeout(300);
   await p.locator('#inspectSelected').click();assert.equal(await p.locator('#inspectorText').isVisible(),true);
-  await p.locator('#closeInspector').click();await p.locator('#toggleBubbleColumn').click();await p.locator('#backupLauncher').click();
+  await p.locator('#closeInspector').click();await p.locator('#mobileMore').click();await p.locator('[data-open=backupLauncher]').click();
   const box=await p.locator('.backup-card').boundingBox();assert.ok(box.x>=0&&box.x+box.width<=391&&box.y>=0&&box.y+box.height<=845);
-  await p.locator('#closeBackups').click();const header=await p.locator('#backupLauncher').boundingBox();assert.ok(header.x>=0&&header.x+header.width<=390);
+  await p.locator('#closeBackups').click();const header=await p.locator('#mobileMore').boundingBox();assert.ok(header.x>=0&&header.x+header.width<=390);
 });
 
 
@@ -93,6 +94,6 @@ test('blocked browser storage still starts the workspace and allows an independe
   // A tour is not auto-opened when storage cannot retain its completion preference.
   await enter(p,'A thought without storage');assert.equal(await p.locator('.bubble').count(),1);
   assert.match(await p.locator('.save-indicator').textContent(),/Not saved/);
-  await p.locator('#voiceSettingsBtn').click();await p.locator('#voiceLanguageInput').fill('en-GB');await p.locator('#voiceSettingsSave').click();assert.equal(await p.evaluate(()=>voiceSettings.language),'en-GB');assert.equal(await p.locator('#voiceSettingsModal').isVisible(),false);
+  await click(p,'#voiceSettingsBtn');await p.locator('#voiceLanguageInput').fill('en-GB');await p.locator('#voiceSettingsSave').click();assert.equal(await p.evaluate(()=>voiceSettings.language),'en-GB');assert.equal(await p.locator('#voiceSettingsModal').isVisible(),false);
   const json=await download(p,'#exportMapIconBtn');assert.equal(json.bubbles[0].text,'A thought without storage');
 });

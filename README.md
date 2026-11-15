@@ -35,13 +35,21 @@ Use **Commands** or Ctrl/Cmd+K to search and run commands. Try `task Ship the MV
 
 Connect mode pauses all bubble creation until you say `end connected mode` or use the explicit End connect mode button. Say `connect bubbles 1 and 2` to draw a connection and remain in connect mode.
 
-Select a thought to open its **inspector**: edit text, type, and notes; choose the presentation starting point; and label its connections. Apply changes to save an undoable edit. Selecting a connection opens its label editor. On a small screen, use Inspect selection to open the sidebar.
+The sidebar keeps **Add thought**, search, and your thought list in view. **More tools & settings** contains advanced selection actions, map files, voice settings, and playback.
 
-Starter templates create an editable project plan, decision map, or brainstorm. Choose **Grid**, **Flowchart**, **Mind map**, or **Timeline** beside Arrange. Flowchart uses directed layers, Mind map spreads thoughts around a starting point, and Timeline follows story order. Layouts preserve locked positions and support undo. Fit changes only the camera. Image export captures the entire map, including labeled directed connections, as a PNG (up to 4096 pixels per side). Thoughts and map history stay in browser storage on the current device; export JSON to keep a portable backup.
+Select a thought to open its **inspector** on the right: edit text, type, and notes; choose the presentation starting point; and label its connections. Apply changes to save an undoable edit. Selecting a connection opens its label editor. On a small screen, tap a thought or use Inspect selection to open its bottom-sheet inspector. Unsaved inspector drafts survive changing screen sizes.
+
+Starter templates create an editable project plan, decision map, or brainstorm. Choose **Grid**, **Flowchart**, **Mind map**, or **Timeline** beside Arrange (inside More on mobile). Flowchart uses directed layers, Mind map spreads thoughts around a starting point, and Timeline follows story order. Layouts preserve locked positions and support undo. Fit changes only the camera. Image export captures the entire map, including labeled directed connections, as a PNG (up to 4096 pixels per side). Thoughts and map history stay in browser storage on the current device; export JSON to keep a portable backup.
+
+## Mobile and presentation controls
+
+On mobile, the bottom toolbar provides **Capture**, **Connect / End connect**, **Search**, and **More**. Search opens the thought drawer; selecting an entry opens its details. More includes Commands, Backups, the guided tour, layouts, and advanced tools.
+
+Canvas buttons have descriptive hover and keyboard-focus tooltips. Thought cards include type badges and two-digit numbering; focus a card and press Enter to inspect it. Presentation dims surrounding thoughts, shows notes as captions, and includes progress. Escape returns to editing.
 
 ## Voice feedback and corrections
 
-The feedback card shows **Heard** for recognized speech (or **Entered** for typed input), followed by the actual outcome. Failed targets, duplicate connections, cancelled confirmations, and incomplete corrections give feedback without creating unwanted thoughts.
+The single activity area beside the capture input shows **Heard** for recognized speech (or **Entered** for typed input), followed by the actual outcome. Failed targets, duplicate connections, cancelled confirmations, and incomplete corrections give feedback without creating unwanted thoughts. Expand Recent activity for the latest 12 outcomes; notifications and transcripts no longer overlap the canvas.
 
 - `rename bubble two to NASA Launch Plan`
 - `change bubble three to a task`
@@ -54,7 +62,7 @@ Corrections preserve capitalization. End connected mode before editing thoughts 
 
 ## Backups and recovery
 
-**Backups** in the header offers JSON downloads, imports, and recent recovery points. The save indicator recommends a download and flags when your downloaded backup is out of date. Recovery points are created after edits and before deleting or replacing a map; the latest 24 are retained across maps. **Restore a copy** preserves the current map and opens a new recovered map.
+**Backups** in the header (or More on mobile) offers JSON downloads, imports, and recent recovery points. The save indicator recommends a download and flags when your downloaded backup is out of date. Recovery points are created after edits and before deleting or replacing a map; the latest 24 are retained across maps. **Restore a copy** preserves the current map and opens a new recovered map.
 
 Recovery points are stored in the same browser, so they do not replace an external backup. Keep a downloaded JSON file somewhere independent. If browser storage is full or unavailable, the app reports that changes are not saved and keeps downloads available. If session history is damaged, startup tries a validated saved map or recovery point and retains the damaged history on this device.
 
@@ -75,7 +83,7 @@ node --test tests/voice.test.cjs tests/tutorial.test.cjs tests/recognition.test.
 With the local HTTP server running and Playwright available in your development environment, run the Chromium smoke checks:
 
 ```bash
-node --test tests/workflows.test.cjs tests/enhancements.test.cjs
+node --test tests/workflows.test.cjs tests/enhancements.test.cjs tests/ui.test.cjs
 node tests/browser-smoke.cjs
 ```
 

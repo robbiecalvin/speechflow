@@ -38,12 +38,13 @@ const voiceRecognitionModule = speechFlowCore.voiceRecognition;
 const voiceSettingsModule = speechFlowCore.voiceSettings;
 
 function getSidebarWidth() {
+  if (window.matchMedia('(max-width: 900px)').matches) return 0;
   if (!sidebarEl) return 280;
   return sidebarEl.getBoundingClientRect().width;
 }
 
 function getWorkspaceWidth() {
-  return Math.max(window.innerWidth - getSidebarWidth(), 1);
+  return Math.max(window.innerWidth - getSidebarWidth() - (window.SpeechFlowUI?.inspectorInset || 0), 1);
 }
 
 const WORKSPACE_MIN_WIDTH = 3200;
@@ -570,7 +571,7 @@ function applyResponsiveSidebarDefault(force = false) {
 
 function updateAudioControlsUI() {
   if (!audioExpandedControls || !audioSingleToggle) return;
-  if (isBubbleColumnCollapsed) {
+  if (isBubbleColumnCollapsed && !audioExpandedControls.closest('#moreModal')) {
     audioExpandedControls.classList.add('hidden');
     audioSingleToggle.classList.remove('hidden');
     if (audioSingleLabel) audioSingleLabel.textContent = 'Play / Pause / Resume / Stop';
@@ -1187,6 +1188,7 @@ function setActiveTool(tool) {
   if (tool === 'connect') isConnectMode = true;
   if (selectedBubble?.el) selectedBubble.el.style.outline = '';
   activeTool = tool;
+  document.querySelectorAll('[data-tool]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tool === tool)));
   if (toolSelectBtn) toolSelectBtn.classList.toggle('active', tool === 'select');
   if (toolPanBtn) toolPanBtn.classList.toggle('active', tool === 'pan');
   if (toolConnectBtn) toolConnectBtn.classList.toggle('active', tool === 'connect');
@@ -2983,7 +2985,7 @@ function saveSnapshot() {
 function updateBubbleIds() {
   bubbles.forEach((b, i) => {
     b.order = i + 1;
-    if (b.idLabel) b.idLabel.textContent = `${i + 1}`;
+    if (b.idLabel) b.idLabel.textContent = String(i + 1).padStart(2, '0');
   });
 }
 

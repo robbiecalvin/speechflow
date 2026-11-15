@@ -1,3 +1,4 @@
+const {click,reveal}=require('./ui-actions.cjs');
 const {test,before,after} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
@@ -97,13 +98,13 @@ test('edit text and type, duplicate, delete with attached edges, undo and redo',
   await p.keyboard.press('Delete');await count(p,2);
   await p.locator('.bubble').first().click();await p.keyboard.press('Delete');await count(p,1);
   assert.equal(await p.evaluate(()=>connections.length),0);
-  await p.locator('#undoBtn').click();await count(p,2);assert.equal(await p.evaluate(()=>connections.length),1);
-  await p.locator('#redoBtn').click();await count(p,1);
+  await click(p,'#undoBtn');await count(p,2);assert.equal(await p.evaluate(()=>connections.length),1);
+  await click(p,'#redoBtn');await count(p,1);
 });
 
 test('JSON backup round-trip and invalid imports preserve graph and undo history',async t=>{
   const p=await session(t);await capture(p,'First backup thought');await capture(p,'task Second backup thought');await capture(p,'connect bubbles 1 and 2');
-  const pending=p.waitForEvent('download');await p.locator('#exportMapIconBtn').click();const download=await pending;
+  const pending=p.waitForEvent('download');await click(p,'#exportMapIconBtn');const download=await pending;
   const json=await fs.readFile(await download.path(),'utf8');assert.equal(JSON.parse(json).connections.length,1);
   await p.locator('#importMap').setInputFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(json)});
   await p.waitForTimeout(100);await count(p,2);assert.equal(await p.evaluate(()=>connections.length),1);
@@ -124,7 +125,7 @@ test('new maps, history, and undo keep separate map records',async t=>{
   await p.locator('#saveBubbleTypes').click();await count(p,0);await capture(p,'Second map thought');
   await p.locator('#mapHistoryBtn').click();await p.locator('.history-item').filter({hasText:'Untitled Map'}).getByRole('button',{name:'Load'}).click();
   assert.equal(await p.locator('.bubble-text').first().textContent(),'Original map thought');
-  await p.locator('#undoBtn').click();
+  await p.waitForTimeout(300);assert.equal(await p.locator('#undoBtn').isDisabled(),true);
   assert.equal(await p.evaluate(()=>mapName),'Untitled Map','undo must stay within loaded map');
 });
 
@@ -134,7 +135,7 @@ test('dragging and shape changes survive reload without losing edges',async t=>{
   const old=await p.evaluate(()=>({x:bubbles[0].x,y:bubbles[0].y}));
   await p.mouse.move(box.x+box.width/2,box.y+box.height/2);await p.mouse.down();await p.mouse.move(box.x+box.width/2+65,box.y+box.height/2+50,{steps:8});await p.mouse.up();
   assert.notDeepEqual(await p.evaluate(()=>({x:bubbles[0].x,y:bubbles[0].y})),old);
-  await bubble.click();await p.locator('summary').filter({hasText:'Arrange & Style'}).click();
+  await bubble.click();await reveal(p,'#applyShapeBtn');await p.locator('summary').filter({hasText:'Arrange & Style'}).click();
   await p.locator('#shapePicker').selectOption('rect');await p.locator('#applyShapeBtn').click();
   await p.reload();assert.equal(await p.locator('.bubble').first().getAttribute('class').then(c=>c.includes('shape-rect')),true);
   assert.equal(await p.evaluate(()=>connections.length),1);
@@ -142,10 +143,10 @@ test('dragging and shape changes survive reload without losing edges',async t=>{
 
 test('playback pauses, resumes, and stops without hidden nodes or stale timers',async t=>{
   const p=await session(t);await capture(p,'First spoken idea');await capture(p,'Second spoken idea');
-  await p.locator('#audioPlayStopToggle').click();assert.equal(await p.evaluate(()=>playbackActive),true);
-  await p.locator('#audioPauseResumeToggle').click();assert.equal(await p.evaluate(()=>playbackPaused),true);
-  await p.locator('#audioPauseResumeToggle').click();assert.equal(await p.evaluate(()=>playbackPaused),false);
-  await p.locator('#audioPlayStopToggle').click();assert.equal(await p.evaluate(()=>playbackActive),false);
+  await click(p,'#audioPlayStopToggle');assert.equal(await p.evaluate(()=>playbackActive),true);
+  await click(p,'#audioPauseResumeToggle');assert.equal(await p.evaluate(()=>playbackPaused),true);
+  await click(p,'#audioPauseResumeToggle');assert.equal(await p.evaluate(()=>playbackPaused),false);
+  await click(p,'#audioPlayStopToggle');assert.equal(await p.evaluate(()=>playbackActive),false);
   assert.equal(await p.locator('.bubble:visible').count(),2);
   assert.equal(await p.evaluate(()=>voiceStateMachine.getState().state),'idle');
 });

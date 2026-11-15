@@ -58,7 +58,8 @@
   }
   function position() {
     if (!model.getState().active) return;
-    const target = document.querySelector(model.getState().step.target);
+    const selector = model.getState().step.target;
+    const target = window.SpeechFlowUI?.tourTarget(selector) || document.querySelector(selector);
     if (!target) return;
     if (model.getState().step.sidebar) target.scrollIntoView({block:'nearest'});
     const rect = target.getBoundingClientRect();
@@ -72,6 +73,7 @@
       top = rect.top - height - 18;
       if (top < 12) top = rect.bottom + 18;
     }
+    left = Math.max(12, Math.min(innerWidth - width - 12, left));
     top = Math.max(12, Math.min(innerHeight - height - 12, top));
     const geometry = [rect.left,rect.top,rect.width,rect.height,left,top].join('|');
     if (geometry === lastGeometry) return;
