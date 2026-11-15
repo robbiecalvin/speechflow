@@ -45,6 +45,8 @@ Starter templates create an editable project plan, decision map, or brainstorm. 
 
 On mobile, the bottom toolbar provides **Capture**, **Connect / End connect**, **Search**, and **More**. Search opens the thought drawer; selecting an entry opens its details. More includes Commands, Backups, the guided tour, layouts, and advanced tools.
 
+Ctrl/Cmd+K toggles Commands and replaces the More menu rather than stacking dialogs. Escape closes menus and returns focus to a visible control, including after resizing. Closed mobile drawers are excluded from keyboard navigation.
+
 Canvas buttons have descriptive hover and keyboard-focus tooltips. Thought cards include type badges and two-digit numbering; focus a card and press Enter to inspect it. Presentation dims surrounding thoughts, shows notes as captions, and includes progress. Escape returns to editing.
 
 ## Voice feedback and corrections

@@ -8,6 +8,8 @@
   let lastMode = document.body.dataset.workspaceMode;
   let lastViewport = innerWidth;
   let returnFocus;
+  let lastFocusedElement=document.activeElement;
+  document.addEventListener('focusin',event=>{lastFocusedElement=event.target;});
   const layer = document.createElement('div');
   layer.id = 'uiLayer';
   layer.innerHTML = `
@@ -86,7 +88,10 @@
     $('moreModal').classList.remove('hidden');$('moreModal').setAttribute('aria-hidden','false');$('closeMore').focus();
   }
   function closeMore(){
-    $('moreModal').classList.add('hidden');$('moreModal').setAttribute('aria-hidden','true');returnFocus?.focus();
+    $('moreModal').classList.add('hidden');$('moreModal').setAttribute('aria-hidden','true');
+    const rect=returnFocus?.getBoundingClientRect();
+    const visible=returnFocus?.isConnected&&!returnFocus.closest('[inert]')&&rect?.width>0&&rect?.height>0&&rect.left>=0&&rect.top>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight;
+    (visible?returnFocus:mobile.matches?$('mobileMore'):$('moreTools')).focus({preventScroll:true});
   }
   $('moreTools').onclick=openMore;$('mobileMore').onclick=openMore;$('closeMore').onclick=closeMore;
   $('moreModal').addEventListener('click',event=>{if(event.target===$('moreModal'))closeMore();});
@@ -174,6 +179,13 @@
     $('sidebarBackdrop').classList.toggle('hidden',!mobile.matches||isBubbleColumnCollapsed||mode==='present');
     $('inspectorBackdrop').classList.toggle('hidden',!mobile.matches||!mobileInspectorOpen||inspector.classList.contains('hidden')||mode!=='explore');
     if(mobile.matches&&isBubbleColumnCollapsed&&document.activeElement?.closest('#sidebar'))$('mobileSearch').focus({preventScroll:true});
+    const sidebarHidden=mode==='present'||(mobile.matches&&isBubbleColumnCollapsed);
+    $('sidebar').inert=sidebarHidden;
+    $('sidebar').setAttribute('aria-hidden',String(sidebarHidden));
+    const inspectorHidden=mode!=='explore'||inspector.classList.contains('hidden')||(mobile.matches&&!mobileInspectorOpen);
+    const focusInInspector=document.activeElement?.closest('#thoughtInspector')||((document.activeElement===document.body||document.activeElement===document.documentElement)&&lastFocusedElement?.closest('#thoughtInspector'));
+    if(inspectorHidden&&focusInInspector)(mode==='present'?$('exitPresentation'):mobile.matches?$('mobileCapture'):$('quickCapture')).focus({preventScroll:true});
+    inspector.inert=inspectorHidden;
     inspector.setAttribute('role',mobile.matches?'dialog':'complementary');inspector.setAttribute('aria-modal','false');
     const side=getSidebarWidth(),inset=window.SpeechFlowUI?.inspectorInset||0;
     document.documentElement.style.setProperty('--ui-sidebar',`${side}px`);document.documentElement.style.setProperty('--ui-inspector',`${inset}px`);

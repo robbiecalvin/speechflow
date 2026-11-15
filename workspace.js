@@ -224,7 +224,14 @@
     nodes.slice(1).forEach(node => addConnection(nodes[0], node)); updateSidebar(); saveSnapshot(); fit(); notify('A starting point, ready to make your own.');
   });
   document.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); e.stopImmediatePropagation(); openCommands(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (!$('commandsModal').classList.contains('hidden')) { closeCommands(); return; }
+      const more = document.getElementById('moreModal');
+      if (more && !more.classList.contains('hidden')) window.SpeechFlowUI?.closeMore();
+      else if (isAnyModalOpen()) return;
+      openCommands(); return;
+    }
     if (!$('commandsModal').classList.contains('hidden')) {
       if (e.key === 'Escape') { e.preventDefault(); closeCommands(); }
       if (e.key === 'Tab') {

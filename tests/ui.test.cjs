@@ -85,3 +85,30 @@ test('short mobile screens keep capture reachable when the keyboard reduces avai
   const input=await p.locator('#quickCapture').boundingBox();assert.ok(input.y>=72&&input.y+input.height<=420);assert.equal(await p.locator('#mobileNavigation').isVisible(),false);
   await p.locator('#quickCapture').fill('A thought on a smaller screen');await p.keyboard.press('Enter');assert.equal(await p.locator('.bubble').count(),1);
 });
+
+test('command shortcut replaces More, toggles Commands, and does not stack unrelated dialogs',async t=>{
+  const p=await open(t);await p.locator('#moreTools').click();await p.keyboard.press('Control+k');
+  assert.equal(await p.locator('.modal:not(.hidden)').count(),1);assert.equal(await p.locator('#commandsModal').isVisible(),true);
+  await p.keyboard.press('Control+k');assert.equal(await p.locator('.modal:not(.hidden)').count(),0);assert.equal(await p.evaluate(()=>document.activeElement.id),'moreTools');
+  await p.locator('#backupLauncher').click();await p.keyboard.press('Control+k');assert.equal(await p.locator('.modal:not(.hidden)').count(),1);assert.equal(await p.locator('#backupModal').isVisible(),true);
+});
+
+test('closing More restores a visible trigger after desktop-to-mobile and mobile-to-desktop resizing',async t=>{
+  const p=await open(t);await p.locator('#moreTools').click();await p.setViewportSize({width:390,height:844});await p.waitForTimeout(250);await p.keyboard.press('Escape');
+  assert.equal(await p.evaluate(()=>document.activeElement.id),'mobileMore');
+  await p.locator('#mobileMore').click();await p.setViewportSize({width:1440,height:1000});await p.waitForTimeout(250);await p.keyboard.press('Escape');
+  assert.equal(await p.evaluate(()=>document.activeElement.id),'moreTools');
+});
+
+test('mobile thought drawer is inert when closed and keyboard reachable when open',async t=>{
+  const p=await open(t,{width:390,height:844});assert.equal(await p.locator('#sidebar').evaluate(el=>el.inert),true);
+  await p.locator('#mobileSearch').click();assert.equal(await p.locator('#sidebar').evaluate(el=>el.inert),false);assert.equal(await p.evaluate(()=>document.activeElement.id),'thoughtSearch');
+  await p.keyboard.press('Escape');assert.equal(await p.locator('#sidebar').evaluate(el=>el.inert),true);assert.equal(await p.evaluate(()=>document.activeElement.id),'mobileSearch');
+});
+
+test('responsive reflow moves focus out of a hidden inspector without losing a draft',async t=>{
+  const p=await open(t);await enter(p,'A thought with a draft');await p.waitForTimeout(350);await p.locator('#inspectorNotes').fill('Keep these notes.');
+  await p.setViewportSize({width:390,height:844});await p.waitForTimeout(350);assert.equal(await p.evaluate(()=>document.activeElement.id),'mobileCapture');
+  assert.equal(await p.locator('#thoughtInspector').evaluate(el=>el.inert),true);
+  await p.locator('#inspectSelected').click();assert.equal(await p.locator('#thoughtInspector').evaluate(el=>el.inert),false);assert.equal(await p.locator('#inspectorNotes').inputValue(),'Keep these notes.');
+});
