@@ -1,0 +1,63 @@
+const {test,before,after}=require('node:test');
+const assert=require('node:assert/strict');
+const {chromium}=require('playwright');
+let browser;
+before(async()=>{browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});});
+after(async()=>browser?.close());
+async function setup(t){
+ const page=await browser.newPage({viewport:{width:820,height:1000},hasTouch:true,isMobile:true});
+ t.after(()=>page.close());
+ await page.addInitScript(()=>localStorage.setItem('speechflow.tutorial.v1','skip'));
+ await page.goto(process.env.SPEECHFLOW_URL||'http://127.0.0.1:8080');
+ await page.evaluate(()=>{SpeechFlowWorkspace.submit('Alpha');SpeechFlowWorkspace.submit('Beta');activeBubble=null;SpeechFlowWorkspace.fit();});
+ await page.waitForTimeout(400);
+ const cdp=await page.context().newCDPSession(page);
+ const touch=(type,points)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:points.map(([id,x,y])=>({id,x,y}))});
+ return {page,touch};
+}
+test('actual touch tap, drag, pinch rollback, cancellation, and one undo step',async t=>{
+ const {page:p,touch}=await setup(t);
+ const box=await p.locator('.bubble').first().boundingBox();const x=box.x+box.width/2,y=box.y+box.height/2;
+ const before=await p.evaluate(()=>({x:bubbles[0].x,y:bubbles[0].y,history:undoStack.length}));
+ await touch('touchStart',[[0,x,y]]);await touch('touchMove',[[0,x+35,y+25]]);await touch('touchEnd',[]);
+ assert.equal(await p.evaluate(()=>undoStack.length),before.history+1);
+ assert.equal(await p.evaluate(()=>activeBubble),null,'drag must not select');
+ await p.evaluate(()=>undo());assert.equal(await p.evaluate(()=>bubbles[0].x),before.x);
+ await p.waitForTimeout(100);
+ await touch('touchStart',[[0,x,y]]);await touch('touchMove',[[0,x+30,y+20]]);
+ await touch('touchStart',[[0,x+30,y+20],[1,x+110,y+80]]);
+ await touch('touchMove',[[0,x+10,y+10],[1,x+160,y+110]]);await touch('touchEnd',[]);
+ assert.equal(await p.evaluate(()=>bubbles[0].x),before.x,'pinch rolls back provisional card move');
+ assert.equal(await p.evaluate(()=>undoStack.length),before.history);
+ await p.evaluate(()=>SpeechFlowWorkspace.fit());await p.waitForTimeout(100);
+ await touch('touchStart',[[0,x,y]]);await touch('touchMove',[[0,x+30,y+20]]);await touch('touchCancel',[]);
+ assert.equal(await p.evaluate(()=>bubbles[0].x),before.x);assert.equal(await p.evaluate(()=>undoStack.length),before.history);
+ await p.locator('.bubble').first().tap();assert.equal(await p.evaluate(()=>activeBubble?.id),await p.evaluate(()=>bubbles[0].id));
+});
+test('tap connection has persistent source, cancel, idempotent entry, feedback and undo',async t=>{
+ const {page:p}=await setup(t);
+ await p.evaluate(()=>setConnectModeFromVoice(true));
+ await p.locator('.bubble').first().tap();
+ await p.evaluate(()=>setConnectModeFromVoice(true));
+ assert.match(await p.locator('#connectionSource').textContent(),/Alpha/);
+ await p.locator('#cancelLink').click();assert.equal(await p.evaluate(()=>isConnectMode),true);
+ await p.locator('.bubble').first().tap();await p.locator('.bubble').nth(1).tap();
+ assert.equal(await p.evaluate(()=>connections.length),1);assert.equal(await p.evaluate(()=>isConnectMode),true);
+ await p.evaluate(()=>undo());assert.equal(await p.evaluate(()=>connections.length),0);
+ await p.locator('#endConnect').click();assert.equal(await p.evaluate(()=>isConnectMode),false);
+});
+test('empty-canvas touch pans; Outline keeps native panel scrolling at different map zooms',async t=>{
+ const {page:p,touch}=await setup(t);
+ const camera=await p.evaluate(()=>[camX,camY]);
+ await touch('touchStart',[[0,25,160]]);await touch('touchMove',[[0,65,195]]);await touch('touchEnd',[]);
+ assert.notDeepEqual(await p.evaluate(()=>[camX,camY]),camera);
+ await p.evaluate(()=>{for(let i=0;i<25;i++)createBubble(`Thought ${i}`,1000+i*200,1000);saveSnapshot();zoom=.2;});
+ await p.locator('#outlineView').click();
+ const stable=await p.evaluate(()=>[camX,camY,zoom]);
+ const box=await p.locator('#outlinePanel').boundingBox();const x=box.x+box.width/2,y=box.y+box.height-35;
+ await touch('touchStart',[[0,x,y]]);
+ for(let i=1;i<=5;i++)await touch('touchMove',[[0,x,y-i*45]]);
+ await touch('touchEnd',[]);await p.waitForTimeout(200);
+ assert.ok(await p.locator('#outlinePanel').evaluate(el=>el.scrollTop)>0,'native touch scrolling remains enabled');
+ assert.deepEqual(await p.evaluate(()=>[camX,camY,zoom]),stable);
+});

@@ -22,6 +22,7 @@
     let stoppedByUser = false;
     let restartAllowed = true;
     let isRunning = false;
+    let delivered = new Set();
 
     function clearRestartTimer() {
       if (restartTimer) {
@@ -47,19 +48,32 @@
     }
 
     function bindRecognitionEvents() {
+      const boundRecognition=recognition;
+      recognition.onstart = () => {
+        if(stoppedByUser || recognition!==boundRecognition)return;
+        opts.voiceState.transition(opts.voiceState.STATES.LISTENING, {source:'onstart'});
+      };
       recognition.onresult = (event) => {
-        if (stoppedByUser || (opts.shouldAcceptResult && !opts.shouldAcceptResult())) return;
+        if (recognition!==boundRecognition || stoppedByUser || (opts.shouldAcceptResult && !opts.shouldAcceptResult())) return;
+        if(opts.voiceState.getState().state===opts.voiceState.STATES.REQUESTING_PERMISSION)opts.voiceState.transition(opts.voiceState.STATES.LISTENING,{source:'result'});
         opts.voiceState.transition(opts.voiceState.STATES.PROCESSING, { source: 'onresult' });
-        const lastIndex = event.results.length - 1;
-        const transcript = event.results[lastIndex][0].transcript;
-        if (onResult) onResult(transcript, event);
+        // Each final result index belongs to this recognition session. Ignore repeated finals.
+        // Minimal simulated/legacy events lack resultIndex/isFinal; keep those compatible.
+        const indexed = Number.isInteger(event.resultIndex);
+        for(let i=indexed?event.resultIndex:event.results.length-1;i<event.results.length;i++) {
+          if(stoppedByUser)break;
+          const result=event.results[i];
+          if(result.isFinal===false || (indexed && delivered.has(i)))continue;
+          if(indexed)delivered.add(i);
+          if(onResult)onResult(result[0].transcript, {results:event.results,resultIndex:i});
+        }
         if (!stoppedByUser && opts.voiceState.getState().state === opts.voiceState.STATES.PROCESSING) {
           opts.voiceState.transition(opts.voiceState.STATES.LISTENING, { source: 'onresult_complete' });
         }
       };
 
       recognition.onerror = (event) => {
-        if (stoppedByUser) return;
+        if (recognition!==boundRecognition || stoppedByUser) return;
         const normalizedError = mapError(event);
         restartAllowed = !!(normalizedError.recoverable && normalizedError.restart);
         if (!restartAllowed) clearRestartTimer();
@@ -72,6 +86,7 @@
       };
 
       recognition.onend = () => {
+        if(recognition!==boundRecognition)return;
         isRunning = false;
         const current = opts.voiceState.getState();
         if (stoppedByUser) {
@@ -101,6 +116,7 @@
     function startListening(startOptions) {
       const startOpts = startOptions && typeof startOptions === 'object' ? startOptions : {};
       if (isRunning) return true;
+      recognition=null;
       const instance = ensureRecognition();
       if (!instance) {
         const unsupportedError = {
@@ -125,9 +141,9 @@
 
       try {
         opts.voiceState.transition(opts.voiceState.STATES.REQUESTING_PERMISSION, { source: 'start' });
+        delivered.clear();
         instance.start();
         isRunning = true;
-        opts.voiceState.transition(opts.voiceState.STATES.LISTENING, { source: 'start_success' });
         return true;
       } catch (error) {
         const normalizedError = mapError({ error: error?.name || 'start_failed' });
@@ -146,9 +162,11 @@
       stoppedByUser = true;
       clearRestartTimer();
       restartAttempts = 0;
-      if (recognition) {
+      const stoppingRecognition = recognition;
+      recognition = null;
+      if (stoppingRecognition) {
         try {
-          recognition.stop();
+          stoppingRecognition.stop();
         } catch (error) {
           // no-op: recognition may already be stopped
         }

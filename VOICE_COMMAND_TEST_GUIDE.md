@@ -54,7 +54,7 @@ The feedback card shows what was heard and whether the action succeeded, failed,
 - If **wake phrase mode** is enabled, every spoken command must start with your configured wake phrase.
   - Example with wake phrase `speechflow`: `speechflow connect mode`
 - If **push-to-talk** is enabled, hold `Space` while speaking.
-- Voice input is ignored while any modal is open.
+- While a panel is open, only its close/cancel commands are accepted; other speech cannot create thoughts. Say “close panel”, “close voice settings”, “close commands”, or “close backups”. Native destructive confirmations use their touch/keyboard controls.
 - Confidence filtering applies if threshold is set above `0`.
 
 ## Parsing Rules
@@ -83,7 +83,7 @@ Expected: selects bubble index 3 and centers camera on it.
 
 ### Connect Mode
 
-Say `connect mode` or `connected mode` to enter a persistent connection-only mode. Repeating the entry phrase keeps it enabled. While active, speech, typing, Add Bubble, templates, duplicate, paste, and frame creation cannot create new bubbles. Tool shortcuts cannot silently exit it. Undo and redo are paused until you end the mode.
+Say `connect mode` or `connected mode` to enter a persistent connection-only mode. Repeating the entry phrase keeps it enabled. While active, speech, typing, Add Bubble, templates, duplicate, paste, and frame creation cannot create new bubbles. Tool shortcuts cannot silently exit it. Undo and redo remain available for connection corrections.
 
 Say `connect bubbles 1 and 2` (or `connect bubbles one and two`) to immediately draw a directed connection between existing bubbles. The mode stays active after connecting. Invalid, identical, and duplicate endpoints leave the map unchanged. Connection and exit commands remain available even if the input preference was Dictation only.
 

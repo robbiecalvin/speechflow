@@ -47,7 +47,7 @@ test('canvas controls have readable layouts, descriptive tooltips, and clear con
   await p.locator('.canvas-tools [data-tool=connect]').hover();assert.equal(await p.locator('#toolTooltip').isVisible(),true);assert.match(await p.locator('#toolTooltip').textContent(),/existing thoughts/);
   await p.locator('.canvas-tools [data-tool=connect]').click();assert.equal(await p.locator('.canvas-tools [data-tool=connect]').getAttribute('aria-pressed'),'true');
   await enter(p,'Do not create this');assert.equal(await p.locator('.bubble').count(),2);
-  await p.locator('#connectModeBanner button').click();await p.waitForTimeout(250);
+  await p.locator('#endConnect').click();await p.waitForTimeout(250);
   const picker=await p.locator('#layoutPicker').boundingBox();assert.ok(picker.width>=90);
   await p.locator('#layoutPicker').selectOption('flowchart');await p.locator('#arrangeMap').click();assert.equal(await p.evaluate(()=>isConnectMode),false);
 });

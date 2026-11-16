@@ -148,6 +148,7 @@
     if(event.key==='Escape'&&mobile.matches&&mobileInspectorOpen){event.preventDefault();event.stopImmediatePropagation();closeInspector();return;}
     if(event.key==='Escape'&&mobile.matches&&!isBubbleColumnCollapsed){event.preventDefault();event.stopImmediatePropagation();closeList();return;}
     const node=event.target.closest('.bubble');
+    if(event.key==='Enter'&&node&&isConnectMode){event.preventDefault();event.stopImmediatePropagation();chooseConnectionThought(bubbles.find(b=>b.el===node));return;}
     if(event.key==='Enter'&&node&&document.body.dataset.workspaceMode!=='present'&&!isConnectMode){event.preventDefault();event.stopImmediatePropagation();const thought=bubbles.find(b=>b.el===node);if(thought){makeBubbleActive(thought);openInspector();}}
   },true);
   function decorateThoughts(){
@@ -169,7 +170,7 @@
   function refreshActions(){
     const selection=getSelectionNodes(),hasThought=!!activeBubble;
     const rules={quickConnect:hasThought&&bubbles.length>1,lockToggle:hasThought,deleteBubble:hasThought,copySelectionBtn:selection.length>0,cutSelectionBtn:selection.length>0,duplicateSelectionBtn:selection.length>0,groupSelectionBtn:selection.length>1,ungroupSelectionBtn:selection.some(n=>n.groupId),frameSelectionBtn:selection.length>0,applyShapeBtn:selection.length>0,alignLeftBtn:selection.length>1,alignTopBtn:selection.length>1,distributeHorizontalBtn:selection.length>2,distributeVerticalBtn:selection.length>2,pasteSelectionBtn:!!clipboardSnapshot?.nodes?.length,undoBtn:undoStack.length>1,redoBtn:redoStack.length>0};
-    for(const [id,enabled] of Object.entries(rules))if($(id))$(id).disabled=!enabled||isConnectMode;
+    for(const [id,enabled] of Object.entries(rules))if($(id))$(id).disabled=!enabled||(isConnectMode&&!['undoBtn','redoBtn'].includes(id));
   }
   function sync(){
     const mode=document.body.dataset.workspaceMode;

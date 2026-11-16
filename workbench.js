@@ -180,7 +180,8 @@
     }
   },true);
   setInterval(()=>{refreshInspector();inspectButton.classList.toggle('hidden',!activeBubble||!isBubbleColumnCollapsed);},250);
-  window.SpeechFlowWorkbench={getPresentationState(){return {position,total:sequence.length};},heard,showOutcome,finishInput(){inputActive=false;},get notificationVersion(){return notificationVersion;},rename,changeType,labelConnection,setStart,applyLayout,downloadBackup,openBackups,checkpoint,presentationStart,navigate,refreshInspector};
+  window.SpeechFlowWorkbench={getPresentationState(){return {position,total:sequence.length};},heard,showOutcome,finishInput(){inputActive=false;},get hasInspectorDraft(){return inspectorDirty;},
+    get notificationVersion(){return notificationVersion;},rename,changeType,labelConnection,setStart,applyLayout,downloadBackup,openBackups,checkpoint,presentationStart,navigate,refreshInspector};
   renderBackupStatus();
   if(startupRecoveryMessage){SpeechFlowWorkspace.notify(startupRecoveryMessage,'info');$('commandReceipt').dataset.active='true';$('receiptHeard').textContent='Session recovery';}
 })();

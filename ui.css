@@ -34,3 +34,39 @@ body[data-workspace-mode=capture] #thoughtInspector,body[data-workspace-mode=pre
 @media(max-width:900px) and (max-height:600px){body:has(#quickCapture:focus) .welcome-card{display:none}}
 @media(max-width:900px) and (max-height:600px){.welcome-card{top:30%}.welcome-card .welcome-symbol,.welcome-card p,.welcome-card .starter-options{display:none}.welcome-card h1{font-size:30px;margin:14px 0 18px}body:has(#quickCapture:focus) #mobileNavigation,body:has(#quickCapture:focus) .canvas-meta,body:has(#quickCapture:focus) .zoom-controls{display:none}body:has(#quickCapture:focus) .capture-dock{bottom:12px!important;max-height:calc(100dvh - 84px);overflow:auto}}
 .bubble-type-badge,.bubble-id-label{opacity:1;font-size:9px;color:inherit}.bubble-id-label{font-weight:600}#receiptHeard{color:#65765b}#activityHistory>summary{color:#65765b}.capture-dock input::placeholder{color:#718364}
+
+/* Canvas owns gestures; panels keep native scroll and browser zoom. */
+.bubble, #connections, #clickLayer { touch-action: none; }
+.bubble.connection-source { outline: 3px dashed #23634c; }
+.bubble.connection-source::after { content: 'Source →'; position: absolute; top: -28px; background: #fff; color: #183b2d; padding: 4px; font-size: 14px; }
+#connectModeBanner button, #captureDock button { min-height: 44px; min-width: 44px; }
+@media (pointer: coarse) { .bubble-connector, .bubble-resize-handle { display: none; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+.view-switch { display: inline-flex; gap: 4px; pointer-events: auto; }
+.view-switch button { min-height: 44px; padding: 8px 12px; border-radius: 12px; border: 1px solid #bbc8b5; background: #fafbf7; color: #234c37; }
+.view-switch [aria-pressed=true] { background: #234c37; color: white; }
+#outlinePanel { position: fixed; z-index: 10; top: 155px; bottom: 270px; left: calc(var(--ui-sidebar, 0px) + 24px); right: calc(var(--ui-inspector, 0px) + 24px); padding: 20px; overflow: auto; background: #f5f6ef; border: 1px solid #bbc8b5; border-radius: 18px; overscroll-behavior: contain; }
+#outlinePanel article { padding: 12px 0; border-bottom: 1px solid #bbc8b5; }
+#outlinePanel button { text-align: left; white-space: normal; overflow-wrap: anywhere; min-height: 44px; }
+#outlinePanel p { white-space: pre-wrap; overflow-wrap: anywhere; }
+#outlinePanel input, #outlinePanel select { width: 100%; min-height: 44px; }
+body[data-project-view=outline] > .bubble, body[data-project-view=outline] > canvas { visibility: hidden; pointer-events: none; }
+.capture-correction { display: flex; gap: 8px; flex-wrap: wrap; }
+.capture-correction button { font-size: 11px; background: transparent; border: 0; color: #234c37; }
+#projectsModal label { display: grid; gap: 8px; } #projectsModal input { min-height: 44px; }
+#projectsModal button { min-height: 44px; margin: 8px 0; }
+@media(max-width:900px) { #outlinePanel { left: 12px; right: 12px; top: 145px; bottom: 290px; } .view-switch button { padding: 6px 9px; } .capture-correction { gap: 2px; } }
+#captureDock.capture-dock { bottom: calc(64px + var(--keyboard-offset, 0px)); }
+@media(max-width:900px) { #captureDock.capture-dock { bottom: calc(108px + var(--keyboard-offset, 0px)); } }
+body:not(:has(.bubble)) .capture-correction { display: none; }
+#captureDock.capture-dock { bottom: calc(64px + env(safe-area-inset-bottom, 0px) + var(--keyboard-offset, 0px)); }
+@media(max-width:900px) { #captureDock.capture-dock { bottom: calc(108px + env(safe-area-inset-bottom, 0px) + var(--keyboard-offset, 0px)); } }
+.view-switch { position: fixed; top: 94px; right: 24px; z-index: 22001; }
+body[data-workspace-mode=present] .view-switch { display: none; }
+@media(max-width:900px) { .view-switch { top: 84px; left: 14px; right: auto; } }
+/* Off-screen graph cards must not enlarge the mobile layout viewport. */
+html { width: 100%; height: 100%; overflow: hidden; }
+body { position: fixed; inset: 0; width: 100%; height: 100%; }
+@media(min-width:1201px) { .view-switch { top: 104px; right: calc(var(--ui-inspector, 0px) + 24px); } }
+@media(min-width:901px) and (max-width:1200px) { .view-switch { top: 160px; left: calc(var(--ui-sidebar) + 24px); right: auto; } #outlinePanel { top: 214px; } }
+@media(max-width:900px) { #thoughtInspector { max-height: min(70dvh, calc(100dvh - 220px), 580px); } }

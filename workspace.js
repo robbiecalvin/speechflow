@@ -58,6 +58,7 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => $('workspaceToast').classList.add('hidden'), 3500);
   }
   function fit() {
+    requestCanvasRender();
     isAutoPanning = false;
     if (!bubbles.length) { notify('Capture a thought to begin your map.'); return; }
     const left = Math.min(...bubbles.map(b => b.x)); const top = Math.min(...bubbles.map(b => b.y));
@@ -121,6 +122,7 @@
     const link=document.createElement('a');link.download=(mapName.replace(/[^a-z0-9_-]+/gi,'-')||'speechflow')+'.png';link.href=image.toDataURL('image/png');link.click();notify('Exported your complete map as a PNG.');
   }
   function changeZoom(direction) {
+    requestCanvasRender();
     const center = getWorkspaceCenterWorld();
     zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * (direction > 0 ? 1.2 : 1/1.2)));
     camX = center.x - getWorkspaceWidth()/2/zoom;
@@ -129,6 +131,7 @@
   function setMode(next) {
     if (!['explore','capture','present'].includes(next)) return;
     mode = next; document.body.dataset.workspaceMode = mode;
+    document.dispatchEvent(new CustomEvent('speechflow:mode',{detail:mode}));
     document.querySelectorAll('[data-mode]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.mode === mode)));
     $('presentationControls').classList.toggle('hidden', mode !== 'present');
     if (mode === 'present') { setActiveTool('select'); fit(); window.SpeechFlowWorkbench?.presentationStart(); }
@@ -157,7 +160,7 @@
     const parsed = voiceParserModule.parseVoiceInput(text);
     if(parsed.mode==='ignore'){notify('Say a thought or command to begin.','info');return false;}
     const connectControl = ['set_connect_mode_on', 'set_connect_mode_off', 'toggle_connect_mode'].includes(parsed.intent);
-    const connectionCommand = isConnectMode && parsed.intent === 'connect_bubbles';
+    const connectionCommand = isConnectMode && ['connect_bubbles','undo','redo'].includes(parsed.intent);
     const createsBubble = parsed.mode === 'dictation' || parsed.intent === 'add_bubble' || /^set_(question|task|note|blocker|idea)_intent$/.test(parsed.intent);
     if (!connectControl && !connectionCommand && isConnectMode && (createsBubble || voiceInputMode === 'dictation')) {
       blockCreationInConnectMode();feedback?.showOutcome('End connected mode before creating new thoughts.','error');return false;
@@ -175,7 +178,8 @@
     else {lastSpokenIntent='idea';result=voiceRouter.route(text);}
     if (result?.status) {notify(result.message,result.status);return result.status==='success';}
     if (bubbles.length>beforeCount) {
-      makeBubbleActive(bubbles[bubbles.length-1]);fit();notify(storageFailures.size?'Thought captured, but not saved. Download a backup now.':'Thought captured. Keep going.',storageFailures.size?'error':'success');
+      if(!window.SpeechFlowWorkbench?.hasInspectorDraft)makeBubbleActive(bubbles.at(-1));
+      notify(storageFailures.size?'Thought captured, but not saved. Download a backup now.':'Thought captured. Keep going.',storageFailures.size?'error':'success');
     } else if(version===feedback?.notificationVersion) notify('Command completed.','success');
     return true;
     } finally { feedback?.finishInput(); }
@@ -246,15 +250,19 @@
     } else if (mode === 'present') { e.stopImmediatePropagation(); }
   }, true);
   let resizeTimer;
-  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (bubbles.length) fit(); }, 100); });
+
   if (bubbles.length) fit();
   const connectBanner = document.createElement('div');
   connectBanner.id = 'connectModeBanner';
   connectBanner.className = 'connect-mode-banner hidden';
   connectBanner.setAttribute('role', 'status');
-  connectBanner.innerHTML = '<span><strong>Connect mode</strong> · “connect bubbles 1 and 2”<small>Creation paused until you say “end connected mode”.</small></span><button type="button">End connect mode</button>';
+  connectBanner.innerHTML = '<span><strong>Connect mode</strong> · “connect bubbles 1 and 2”<small>Creation paused until you say “end connected mode”.</small></span><button type="button" id="cancelLink">Cancel link</button><button type="button" id="endConnect">End connect mode</button>';
   $('captureDock').prepend(connectBanner);
-  connectBanner.querySelector('button').onclick = () => setConnectModeFromVoice(false);
+  $('endConnect').onclick = () => setConnectModeFromVoice(false);
+  $('cancelLink').onclick = () => {cancelPendingLink();notify('Link cancelled. Connect mode remains active.');};
+  const sourceStatus = document.createElement('span');sourceStatus.id='connectionSource';connectBanner.prepend(sourceStatus);
+  function syncSource(){sourceStatus.textContent=selectedBubble?`Connecting from: ${getBubbleDisplayText(selectedBubble)} → choose destination`:'Tap a source, then a destination.';$('cancelLink').disabled=!selectedBubble;}
+  document.addEventListener('speechflow:connection',syncSource);syncSource();
   let lastState = '';
   setInterval(() => {
     const state = `${bubbles.length}|${connections.length}|${mapName}|${zoom}|${activeTool}|${isConnectMode}`;
@@ -262,7 +270,7 @@
       connectBanner.classList.toggle('hidden', !isConnectMode);
       $('quickCapture').placeholder = isConnectMode ? 'Connect bubbles 1 and 2…' : 'An idea, a question, a what if…';
       $('voiceInputMode').disabled = isConnectMode;
-      ['addBubbleBtn','generateFromPrompt','duplicateSelectionBtn','pasteSelectionBtn','frameSelectionBtn','undoBtn','redoBtn'].forEach(id => { if ($(id)) $(id).disabled = isConnectMode; });
+      ['addBubbleBtn','generateFromPrompt','duplicateSelectionBtn','pasteSelectionBtn','frameSelectionBtn'].forEach(id => { if ($(id)) $(id).disabled = isConnectMode; });
       $('workspaceTitle').textContent = mapName; $('zoomValue').textContent = `${Math.round(zoom*100)}%`;
       $('mapStats').textContent = `${bubbles.length} thought${bubbles.length===1?'':'s'} · ${connections.length} connection${connections.length===1?'':'s'}`;
       $('welcomeCard').classList.toggle('hidden', bubbles.length > 0);

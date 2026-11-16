@@ -2,7 +2,7 @@
   const root = global.SpeechFlowCore || (global.SpeechFlowCore = {});
 
   function speak(text, options) {
-    if (!global.speechSynthesis) return false;
+    if (!global.speechSynthesis || typeof global.SpeechSynthesisUtterance !== 'function') return false;
     const opts = options && typeof options === 'object' ? options : {};
     const utterance = new SpeechSynthesisUtterance(String(text || ''));
     utterance.rate = Number.isFinite(opts.rate) ? opts.rate : 1;
@@ -13,7 +13,10 @@
       const voice = voices.find((item) => item?.name === opts.voiceName);
       if (voice) utterance.voice = voice;
     }
-    global.speechSynthesis.speak(utterance);
+    let completed = false;
+    const complete = event => {if(completed)return;completed=true;opts.onComplete?.(event);};
+    utterance.onend=complete;utterance.onerror=complete;
+    try { global.speechSynthesis.speak(utterance); } catch { return false; }
     return true;
   }
 

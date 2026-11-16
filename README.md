@@ -92,3 +92,54 @@ node tests/browser-smoke.cjs
 The browser checks use `/usr/bin/chromium` by default; set `CHROMIUM_PATH` for another executable or `SPEECHFLOW_URL` for another local server. They use an isolated browser session and simulated recognition to verify the command pipeline. Live microphone recognition and audible speech output require manual testing in a supported browser. See [VOICE_COMMAND_TEST_GUIDE.md](./VOICE_COMMAND_TEST_GUIDE.md).
 
 The workflow tests cover first-visit and replayed tutorials, voice navigation, mobile positioning, unsupported browsers, permission denial, editing, dragging, shape persistence, JSON backup round-trips, invalid imports, map history, and playback controls. The smoke checks also exercise connect-mode creation blocking, duplicate and invalid connections, templates, search, arrangement, PNG export, presentation shortcuts, and mobile fit.
+
+## Mobile planning workflow
+
+Tap a thought for details; drag it to move, drag empty canvas to pan, and pinch
+around two fingers to zoom. Starting a pinch rolls back an unfinished card move.
+Cancelled gestures do not add undo history. Panels retain native scrolling and
+browser zoom. Touch users can connect without dragging: enter Connect, tap the
+source, then the destination. **Cancel link** keeps Connect active; **End connect
+mode** resumes capture. Connection changes support undo while Connect is active.
+
+**Map / Outline** switches between projections of the same graph. Outline lists
+all directed relationships, including cycles and cross-links, and supports
+search, details, label editing, and a From/To connection form. The shared
+inspector preserves unsaved drafts when switching views. **Choose as next
+action** marks a thought without requiring a separate task-management schema.
+Click the project name to rename, duplicate, or open recent projects with
+last-edited information.
+
+Capture keeps the camera and input focus steady. Use **Show last on map** or
+Fit when you want to move the view. **Correct last thought**, Undo, and Done typing
+provide explicit correction and keyboard-dismiss routes. Maps stay in browser
+storage; speech recognition may send audio to the browser's speech provider.
+Download JSON backups for an independent copy.
+
+Microphone status waits for actual recognition events. Final result batches are
+processed once per result index; late events from an old recognition session are
+ignored. With a panel open, speech cannot create thoughts; say **close panel**
+(or **close voice settings**, **close commands**, **close backups**) to return.
+Native destructive confirmations retain their touch and keyboard controls.
+Playback advances on utterance completion/error; absent speech output falls
+back to reading in Present mode. Playback callbacks are scoped to their session.
+
+Rendering is requested after state/geometry changes rather than continuously
+redrawing an idle canvas. Buffers resize on size/pixel-density changes. Card
+gestures use delegated listeners, and undo retains the latest 100 snapshots;
+older edits remain available only through downloaded backups/recovery points.
+
+Run the complete automated suite with the HTTP server running:
+
+```bash
+node --test --test-concurrency=1 tests/*.test.cjs
+node tests/browser-smoke.cjs
+```
+
+`mobile.test.cjs` injects actual Chromium touch events through CDP; this is
+simulated device input, not real-device certification. `planning.test.cjs`
+checks graph parity, steady capture, recognition batches/modal closing,
+controlled utterance completion, idle drawing, and listener/history bounds.
+Real Android/iPhone microphone permissions, on-screen keyboards, battery use,
+assistive technologies, and independent user-task completion require manual
+validation. No participant study results are claimed.

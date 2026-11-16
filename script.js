@@ -368,6 +368,7 @@ function isAnyModalOpen() {
 }
 
 function updateVoiceModeHint() {
+  document.dispatchEvent(new Event('speechflow:voice'));
   if (!voiceModeHintEl) return;
   const modeParts = [];
   modeParts.push(!microphoneEnabled ? 'Microphone off' : voiceSettings.pushToTalkEnabled ? 'Push-to-talk (hold Space)' : 'Hands-free listening');
@@ -490,7 +491,7 @@ function clearMapData() {
   playbackPaused = false;
   orderedPlayback = [];
   playbackIndex = 0;
-  window.speechSynthesis.cancel();
+  window.speechSynthesis?.cancel();
   syncCoreGraphState();
   updateAudioControlsUI();
   updateSidebar();
@@ -1186,7 +1187,7 @@ function setActiveTool(tool) {
     return;
   }
   if (tool === 'connect') isConnectMode = true;
-  if (selectedBubble?.el) selectedBubble.el.style.outline = '';
+  cancelPendingLink();
   activeTool = tool;
   document.querySelectorAll('[data-tool]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tool === tool)));
   if (toolSelectBtn) toolSelectBtn.classList.toggle('active', tool === 'select');
@@ -1689,7 +1690,7 @@ function getBubbleAtPoint(clientX, clientY) {
 
 window.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
-  if (e.target.closest('#sidebar, #workspaceShell, .modal')) return;
+  if (e.target.closest('#sidebar, #workspaceShell, #thoughtInspector, #outlinePanel, .modal')) return;
   if (e.target.closest('.bubble-connector')) return;
   const canPan = activeTool === 'pan';
   if (activeTool === 'select' && !e.target.closest('.bubble')) {
@@ -1741,7 +1742,7 @@ window.addEventListener('mousemove', (e) => {
   clampCameraToWorkspace();
 });
 function handleWorkspaceWheelZoom(e) {
-  if (e.target.closest('#sidebar, #workspaceShell, .modal')) return;
+  if (e.target.closest('#sidebar, #workspaceShell, #thoughtInspector, #outlinePanel, .modal')) return;
   e.preventDefault();
   const scale = -e.deltaY * 0.001;
   const prevZoom = zoom;
@@ -1926,8 +1927,29 @@ function selectBubbleByIndex(targetIndex) {
   clampCameraToWorkspace();
 }
 
+function cancelPendingLink() {
+  selectedBubble?.el.classList.remove('connection-source');
+  selectedBubble = null;
+  document.dispatchEvent(new Event('speechflow:connection'));
+}
+
+function chooseConnectionThought(data) {
+  if (!bubbles.includes(data)) return;
+  if (!selectedBubble) {
+    selectedBubble = data;
+    data.el.classList.add('connection-source');
+    window.SpeechFlowWorkspace?.notify(`Connecting from: ${getBubbleDisplayText(data)}. Choose a destination.`);
+  } else {
+    const result = window.SpeechFlowWorkspace.connect(bubbles.indexOf(selectedBubble), bubbles.indexOf(data));
+    window.SpeechFlowWorkspace.notify(result.message, result.status);
+    if (result.status === 'success') cancelPendingLink();
+  }
+  document.dispatchEvent(new Event('speechflow:connection'));
+}
+
 function setConnectModeFromVoice(enabled) {
-  if (selectedBubble?.el) selectedBubble.el.style.outline = '';
+  if (isConnectMode === !!enabled) return {status:'info',message:enabled?'Connect mode is already active. Choose a source and destination.':'Connect mode is already off.'};
+  cancelPendingLink();
   isConnectMode = !!enabled;
   selectedBubble = null;
   pendingConnectionFrom = null;
@@ -2106,11 +2128,11 @@ const voiceRouter = voiceRouterModule?.createVoiceRouter && voiceParserModule?.p
     onSetConnectModeOff: () => setConnectModeFromVoice(false),
     onClearMap: () => {clearMapFromVoice();return {status:'success',message:'Map cleared. You can undo this change.'};},
     onStartPlayback: () => {if(!bubbles.length)return {status:'error',message:'Capture a thought before starting playback.'}; startPlayback();},
-    onStopPlayback: () => stopPlayback(),
-    onPausePlayback: () => {if(!playbackActive)return {status:'info',message:'Playback is not running.'};pausePlayback();},
-    onResumePlayback: () => {if(!playbackActive)return {status:'info',message:'Start playback before resuming it.'};resumePlayback();},
-    onUndo: () => { if(isConnectMode)return {status:'error',message:'End connected mode before undoing.'}; if(undoStack.length<=1)return {status:'info',message:'Nothing to undo.'}; undo(); return {status:'success',message:'Undid the last change.'}; },
-    onRedo: () => { if(isConnectMode)return {status:'error',message:'End connected mode before redoing.'}; if(!redoStack.length)return {status:'info',message:'Nothing to redo.'}; redo(); return {status:'success',message:'Redid the last change.'}; },
+    onStopPlayback: () => {if(!playbackActive)return {status:'info',message:'Playback is not running.'};stopPlayback();return {status:'success',message:'Playback stopped.'};},
+    onPausePlayback: () => {if(!playbackActive)return {status:'info',message:'Playback is not running.'};if(playbackPaused)return {status:'info',message:'Playback is already paused.'};pausePlayback();},
+    onResumePlayback: () => {if(!playbackActive)return {status:'info',message:'Start playback before resuming it.'};if(!playbackPaused)return {status:'info',message:'Playback is already playing.'};resumePlayback();},
+    onUndo: () => { if(undoStack.length<=1)return {status:'info',message:'Nothing to undo.'}; undo(); return {status:'success',message:'Undid the last change.'}; },
+    onRedo: () => { if(!redoStack.length)return {status:'info',message:'Nothing to redo.'}; redo(); return {status:'success',message:'Redid the last change.'}; },
     onAddBubble: (args) => addBubbleFromVoice(args.transcript),
     onDeleteSelectedBubble: () => { if(!activeBubble)return {status:'error',message:'Select a thought before deleting it.'};deleteSelectedBubbleFromVoice(); },
     onLockSelectedBubble: () => {if(!activeBubble)return {status:'error',message:'Select a thought before locking it.'};setLockSelectedBubbleFromVoice(true);return {status:'success',message:'Selected thought locked in place.'};},
@@ -2157,17 +2179,22 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
         recoverable: true,
         restart: true
       },
-    shouldAcceptResult: () => microphoneEnabled && !playbackActive && (!isAnyModalOpen() || window.SpeechFlowTutorial?.active),
+    shouldAcceptResult: () => microphoneEnabled && !playbackActive,
     onResult: (transcript, event) => {
       if (window.SpeechFlowTutorial?.active) {
         if (!window.SpeechFlowTutorial.handleVoice(transcript)) updateVoiceTranscriptDisplay('Tutorial: say “next” or “skip”.');
         return;
       }
       if (isAnyModalOpen()) {
-        updateVoiceTranscriptDisplay('Voice input paused while a modal is open.');
+        const command = stripWakePhraseIfNeeded(transcript)?.trim().toLowerCase().replace(/[.!?]+$/, '');
+        if (command === 'close voice settings') closeVoiceSettingsModal();
+        else if (['close', 'close panel', 'cancel', 'close commands', 'close backups'].includes(command)) {
+          const modal = document.querySelector('.modal:not(.hidden)');
+          modal?.querySelector('button[id^=close], #promptModalCancel, #voiceSettingsCancel')?.click();
+        } else updateVoiceTranscriptDisplay('Panel open. Say “close panel” or use its close button.');
         return;
       }
-      const confidence = Number(event?.results?.[event.results.length - 1]?.[0]?.confidence);
+      const confidence = Number(event?.results?.[event.resultIndex ?? event.results.length - 1]?.[0]?.confidence);
       if (Number.isFinite(confidence) && confidence < voiceSettings.confidenceThreshold) {
         updateVoiceTranscriptDisplay(`Ignored low-confidence input (${confidence.toFixed(2)}).`);
         window.SpeechFlowWorkbench?.heard(transcript,'voice');
@@ -2230,31 +2257,12 @@ if (voiceRecognitionController) {
 }
 
 
-function speakText(text) {
-  if (speechModule?.speak) {
-    speechModule.speak(text, {
-      rate: voiceSettings.playbackRate,
-      pitch: voiceSettings.playbackPitch,
-      lang: voiceSettings.language,
-      voiceName: voiceSettings.playbackVoice
-    });
-    return;
-  }
-
-  if (!window.speechSynthesis) {
-    console.warn("Speech Synthesis not supported");
-    return;
-  }
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = voiceSettings.playbackRate;
-  utterance.pitch = voiceSettings.playbackPitch;
-  utterance.lang = voiceSettings.language || 'en-US';
-  if (voiceSettings.playbackVoice && window.speechSynthesis?.getVoices) {
-    const voice = window.speechSynthesis.getVoices().find((item) => item?.name === voiceSettings.playbackVoice);
-    if (voice) utterance.voice = voice;
-  }
-  window.speechSynthesis.speak(utterance);
+function speakText(text, onComplete) {
+  return speechModule?.speak(text, {
+    rate:voiceSettings.playbackRate, pitch:voiceSettings.playbackPitch,
+    lang:voiceSettings.language, voiceName:voiceSettings.playbackVoice,
+    onComplete
+  }) || false;
 }
 
 
@@ -2263,6 +2271,9 @@ let playbackTimer = null;
 let playbackPaused = false;
 let playbackIndex = 0;
 let orderedPlayback = [];
+let playbackSession = 0;
+let playbackWaiting = false;
+let resumeRecognitionAfterPlayback = false;
 
 applyResponsiveSidebarDefault(true);
 setActiveTool('select');
@@ -2307,7 +2318,11 @@ if (snapToGridInput) {
 function startPlayback() {
   if (!bubbles.length) return;
   if (playbackActive) stopPlayback();
+  resumeRecognitionAfterPlayback = microphoneEnabled && !!voiceRecognitionController?.isListening();
+  if (resumeRecognitionAfterPlayback) voiceRecognitionController.stopListening();
   transitionVoiceStateSafe(voiceStateMachine.STATES.SPEAKING, { source: 'start_playback' });
+  playbackSession++;
+  playbackWaiting = false;
   playbackActive = true;
   playbackPaused = false;
   collapsedAudioStep = 1;
@@ -2335,6 +2350,8 @@ function startPlayback() {
 }
 
 function stopPlayback() {
+  playbackSession++;
+  playbackWaiting = false;
   isAutoPanning = false;
   clearTimeout(playbackTimer);
   bubbles.forEach(b => { b.visible = true; b.el.style.display = 'block'; b.el.style.opacity = 1; });
@@ -2342,8 +2359,10 @@ function stopPlayback() {
   playbackPaused = false;
   orderedPlayback = [];
   playbackIndex = 0;
-  window.speechSynthesis.cancel();
-  transitionVoiceStateSafe(microphoneEnabled ? voiceStateMachine.STATES.LISTENING : voiceStateMachine.STATES.IDLE, { source: 'stop_playback' });
+  window.speechSynthesis?.cancel();
+  transitionVoiceStateSafe(voiceStateMachine.STATES.IDLE, { source: 'stop_playback' });
+  if (resumeRecognitionAfterPlayback && microphoneEnabled) applyVoiceSettingsRuntime();
+  resumeRecognitionAfterPlayback = false;
   collapsedAudioStep = 0;
   updateAudioControlsUI();
 }
@@ -2352,7 +2371,7 @@ function pausePlayback() {
   if (!playbackActive || playbackPaused) return;
   playbackPaused = true;
   clearTimeout(playbackTimer);
-  window.speechSynthesis.pause();
+  window.speechSynthesis?.pause();
   transitionVoiceStateSafe(voiceStateMachine.STATES.PAUSED, { source: 'pause_playback' });
   collapsedAudioStep = 2;
   updateAudioControlsUI();
@@ -2361,11 +2380,11 @@ function pausePlayback() {
 function resumePlayback() {
   if (!playbackActive || !playbackPaused) return;
   playbackPaused = false;
-  window.speechSynthesis.resume();
+  window.speechSynthesis?.resume();
   transitionVoiceStateSafe(voiceStateMachine.STATES.SPEAKING, { source: 'resume_playback' });
   collapsedAudioStep = 3;
   updateAudioControlsUI();
-  playbackTimer = setTimeout(playNextBubble, 3000);
+  if (playbackWaiting) {playbackWaiting=false;playNextBubble();}
 }
 
 function playNextBubble() {
@@ -2381,15 +2400,21 @@ function playNextBubble() {
   b.el.style.display = 'block';
   b.el.style.opacity = 1;
   highlightBubble(b.el);
-  speakText(b.textEl?.textContent || '');
+  const session = playbackSession;
+  const complete = () => {
+    if (!playbackActive || session !== playbackSession) return;
+    playbackWaiting=true;
+    if (playbackPaused) return;
+    playbackTimer=setTimeout(()=>{if(session===playbackSession){playbackWaiting=false;playNextBubble();}},0);
+  };
+  if (!speakText(b.textEl?.textContent || '', complete)) {
+    window.SpeechFlowWorkspace?.notify('Speech output is unavailable. Read the thoughts in Present mode.');
+    stopPlayback();return;
+  }
 
   panToTarget(b.x - getWorkspaceWidth() / 2 / zoom, b.y - window.innerHeight / 2 / zoom);
 
-  playbackTimer = setTimeout(() => {
-    if (playbackActive && !playbackPaused) {
-      playNextBubble();
-    }
-  }, 3000);
+
 }
 
 function handleCollapsedAudioToggle() {
@@ -2416,12 +2441,14 @@ function panToTarget(x, y, duration = 600) {
   const startY = camY;
   const dx = x - camX;
   const dy = y - camY;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) duration = 0;
   const startTime = performance.now();
 
   function animateFrame(time) {
     if (!isAutoPanning) return; // cancel if interrupted
 
-    const t = Math.min((time - startTime) / duration, 1);
+    const t = duration ? Math.min((time - startTime) / duration, 1) : 1;
+    requestCanvasRender();
     camX = startX + dx * t;
     camY = startY + dy * t;
     clampCameraToWorkspace();
@@ -2485,7 +2512,7 @@ clickLayer.addEventListener('mousedown', (e) => {
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
   for (const conn of connections) {
-    if (!(conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y))) continue;
+    if (!(conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x * (window.devicePixelRatio || 1), y * (window.devicePixelRatio || 1)))) continue;
     const fromX = (conn.from.x - camX) * zoom + conn.from.el.offsetWidth * zoom / 2;
     const fromY = (conn.from.y - camY) * zoom + conn.from.el.offsetHeight * zoom / 2;
     const toX = (conn.to.x - camX) * zoom + conn.to.el.offsetWidth * zoom / 2;
@@ -2507,7 +2534,7 @@ clickLayer.addEventListener('click', e => {
   const y = e.clientY - rect.top;
   selectedEdge = null;
   for (const conn of connections) {
-    if (conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y)) {
+    if (conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x * (window.devicePixelRatio || 1), y * (window.devicePixelRatio || 1))) {
       selectedEdge = conn;
       setToolbarStatus(`Selected edge: ${conn.label || '(unlabeled)'}`);
       break;
@@ -2520,7 +2547,7 @@ clickLayer.addEventListener('dblclick', (e) => {
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
   for (const conn of connections) {
-    if (conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x, y)) {
+    if (conn._clickPath && clickCtx.isPointInStroke(conn._clickPath, x * (window.devicePixelRatio || 1), y * (window.devicePixelRatio || 1))) {
       const newLabel = prompt("Label this connection:", conn.label || '');
       if (newLabel !== null) {
         conn.label = newLabel;
@@ -2551,11 +2578,20 @@ window.addEventListener('mouseup', () => {
 
 
 
+let renderSignature = '';
+let canvasFrame = null;
+function requestCanvasRender(){if(canvasFrame===null)canvasFrame=requestAnimationFrame(animate);}
 function animate() {
+  canvasFrame = null;
+  const signature = JSON.stringify([camX,camY,zoom,window.innerWidth,window.innerHeight,devicePixelRatio,getSidebarWidth(),getWorkspaceWidth(),selectedEdge?.id,connectorDragState,activeSnapGuideX,activeSnapGuideY,bubbles.map(b=>[b.x,b.y,b.width,b.height,b.visible,b.shape]),connections.map(e=>[e.id,e.label,e.metadata])], (key,value) => key==='from' ? value?.id : value);
+  if (signature === renderSignature) return;
+  renderSignature = signature;
   const surface = getWorkspaceSurfaceSize();
-
-  canvas.width = surface.width;
-  canvas.height = surface.height;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const bufferWidth = Math.round(surface.width * pixelRatio), bufferHeight = Math.round(surface.height * pixelRatio);
+  if (canvas.width !== bufferWidth) canvas.width = bufferWidth;
+  if (canvas.height !== bufferHeight) canvas.height = bufferHeight;
+  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   canvas.style.left = `${getSidebarWidth()}px`;
   canvas.style.top = '0px';
   canvas.style.width = `${surface.width}px`;
@@ -2638,8 +2674,9 @@ function animate() {
     ctx.setLineDash([]);
   }
 
-  clickLayer.width = surface.width;
-  clickLayer.height = surface.height;
+  if (clickLayer.width !== bufferWidth) clickLayer.width = bufferWidth;
+  if (clickLayer.height !== bufferHeight) clickLayer.height = bufferHeight;
+  clickCtx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   clickLayer.style.left = `${getSidebarWidth()}px`;
   clickLayer.style.top = '0px';
   clickLayer.style.width = `${surface.width}px`;
@@ -2691,128 +2728,12 @@ function animate() {
     b.el.style.transform = `scale(${zoom})${rotate}`;
   });
   updateSnapGuidePosition();
-  requestAnimationFrame(animate);
 }
 
-function enableDragging(el, data) {
-  let isDragging = false;
-  let groupOffsets = [];
-  let activeTouchId = null;
+// Dragging is delegated by mobile.js: one controller owns all pointer IDs.
+function enableDragging() {}
 
-  function startDrag(clientX, clientY) {
-    if (activeTool === 'pan' || isConnectMode) return;
-    isDragging = true;
-    data.dragging = true;
-    const groupedTargets = data.groupId
-      ? bubbles.filter((item) => item.groupId === data.groupId)
-      : [data];
-    const targets = multiSelection.has(data)
-      ? Array.from(multiSelection)
-      : groupedTargets;
-    const leadX = data.x;
-    const leadY = data.y;
-    groupOffsets = targets.map((node) => ({
-      node,
-      offsetX: screenToWorldX(clientX) - node.x,
-      offsetY: clientY / zoom - node.y + camY,
-      deltaXFromLead: node.x - leadX,
-      deltaYFromLead: node.y - leadY
-    }));
-  }
-
-  function moveDrag(clientX, clientY) {
-    groupOffsets.forEach((entry) => {
-      let nextX = maybeSnap(screenToWorldX(clientX) - entry.offsetX);
-      let nextY = maybeSnap((clientY / zoom - entry.offsetY) + camY);
-      if (entry.node === data) {
-        const snapped = applyGuidedSnap(entry.node, nextX, nextY);
-        nextX = snapped.x;
-        nextY = snapped.y;
-      } else if (activeSnapGuideX !== null || activeSnapGuideY !== null) {
-        if (activeSnapGuideX !== null) nextX = activeSnapGuideX + entry.deltaXFromLead;
-        if (activeSnapGuideY !== null) nextY = activeSnapGuideY + entry.deltaYFromLead;
-      }
-      entry.node.x = nextX;
-      entry.node.y = nextY;
-      clampBubbleToWorkspace(entry.node);
-      entry.node.updatedAt = new Date().toISOString();
-    });
-  }
-
-  function finishDrag() {
-    if (!isDragging) return;
-    isDragging = false;
-    data.dragging = false;
-    activeTouchId = null;
-    resolveBubbleCollision(data);
-    data.updatedAt = new Date().toISOString();
-    clearSnapGuides();
-    saveSnapshot();
-  }
-
-  el.addEventListener('mousedown', e => {
-    if (data.locked) return;
-    if (e.button !== 0) return;
-    if (e.target.closest('.bubble-connector')) return;
-    startDrag(e.clientX, e.clientY);
-  });
-
-  document.addEventListener('mousemove', e => {
-    if (!isDragging) return;
-    moveDrag(e.clientX, e.clientY);
-  });
-
-document.addEventListener('mouseup', () => {
-  finishDrag();
-});
-
-  el.addEventListener('touchstart', (e) => {
-    if (data.locked) return;
-    if (activeTouchId !== null) return;
-    const touch = e.changedTouches[0];
-    if (!touch) return;
-    activeTouchId = touch.identifier;
-    startDrag(touch.clientX, touch.clientY);
-    e.preventDefault();
-  }, { passive: false });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!isDragging || activeTouchId === null) return;
-    let activeTouch = null;
-    for (let i = 0; i < e.changedTouches.length; i += 1) {
-      if (e.changedTouches[i].identifier === activeTouchId) {
-        activeTouch = e.changedTouches[i];
-        break;
-      }
-    }
-    if (!activeTouch) return;
-    moveDrag(activeTouch.clientX, activeTouch.clientY);
-    e.preventDefault();
-  }, { passive: false });
-
-  document.addEventListener('touchend', (e) => {
-    if (activeTouchId === null) return;
-    for (let i = 0; i < e.changedTouches.length; i += 1) {
-      if (e.changedTouches[i].identifier === activeTouchId) {
-        finishDrag();
-        break;
-      }
-    }
-  });
-
-  document.addEventListener('touchcancel', (e) => {
-    if (activeTouchId === null) return;
-    for (let i = 0; i < e.changedTouches.length; i += 1) {
-      if (e.changedTouches[i].identifier === activeTouchId) {
-        finishDrag();
-        break;
-      }
-    }
-  });
-
-}
-
-animate();
+requestCanvasRender();
 
 let undoStack = [];
 let redoStack = [];
@@ -2865,6 +2786,9 @@ function getStateSnapshot() {
 }
 
 function restoreStateFromSnapshot(snapshot) {
+  cancelPendingLink();
+  renderSignature = '';
+  requestCanvasRender();
   window.SpeechFlowWorkbench?.checkpoint();
   activeBubble = null;
   selectedBubble = null;
@@ -2973,8 +2897,10 @@ bubbles.push(data);
 }
 
 function saveSnapshot() {
+  requestCanvasRender();
   const snap = getStateSnapshot();
   undoStack.push(snap);
+  if (undoStack.length > 100) undoStack.splice(0, undoStack.length - 100);
   redoStack.length = 0;
   persistLocalValue('bubbleHistory', JSON.stringify(undoStack));
   if (stateModule?.setDirty) stateModule.setDirty(true);
@@ -2991,7 +2917,6 @@ function updateBubbleIds() {
 
 
 function undo() {
-  if (blockCreationInConnectMode()) return;
   if (undoStack.length <= 1) return;
   const snap = undoStack.pop();
   redoStack.push(snap);
@@ -3002,7 +2927,6 @@ function undo() {
 }
 
 function redo() {
-  if (blockCreationInConnectMode()) return;
   if (redoStack.length === 0) return;
   const snap = redoStack.pop();
   undoStack.push(snap);
@@ -3206,6 +3130,7 @@ document.getElementById('importMap').addEventListener('change', (e) => {
 
 // When user clicks a bubble, make it the activeBubble
 function makeBubbleActive(data) {
+  requestCanvasRender();
   if (activeBubble) activeBubble.el.classList.remove('active');
   activeBubble = data;
   data.el.classList.add('active');
@@ -3216,24 +3141,8 @@ function makeBubbleActive(data) {
 }
 
 
-// Attach to all bubbles after creation
-function enableBubbleInteractions(bubble, data) {
-  bubble.addEventListener('click', (event) => {
-    const additive = !!(event.shiftKey || event.metaKey || event.ctrlKey);
-    if (activeTool === 'connect' || isConnectMode) {
-      if (!selectedBubble) {
-        selectedBubble = data;
-        bubble.style.outline = '2px solid yellow';
-        return;
-      }
-      if (selectedBubble !== data) {
-        addConnection(selectedBubble, data, { label: '' });
-        saveSnapshot();
-      }
-      selectedBubble.el.style.outline = '';
-      selectedBubble = null;
-      return;
-    }
+function selectThought(data, event = {}) {
+  const additive = !!(event.shiftKey || event.metaKey || event.ctrlKey);
     if (additive) {
       toggleBubbleInSelection(data, true);
     } else {
@@ -3246,6 +3155,17 @@ function enableBubbleInteractions(bubble, data) {
       updateMultiSelectionVisuals();
     }
     makeBubbleActive(data);
+}
+
+// Attach to all bubbles after creation
+function enableBubbleInteractions(bubble, data) {
+  bubble.addEventListener('click', (event) => {
+    const additive = !!(event.shiftKey || event.metaKey || event.ctrlKey);
+    if (activeTool === 'connect' || isConnectMode) {
+      chooseConnectionThought(data);
+      return;
+    }
+    selectThought(data, event);
   });
 }
 

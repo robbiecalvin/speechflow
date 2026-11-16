@@ -142,7 +142,10 @@ test('dragging and shape changes survive reload without losing edges',async t=>{
 });
 
 test('playback pauses, resumes, and stops without hidden nodes or stale timers',async t=>{
-  const p=await session(t);await capture(p,'First spoken idea');await capture(p,'Second spoken idea');
+  const p=await session(t);
+  // Headless machines have no reliable speech output. Completion is tested with
+  // controlled utterance events in planning.test.cjs. Keep this suite deterministic.
+  await p.evaluate(()=>Object.defineProperty(window,'speechSynthesis',{value:{speak(){},cancel(){},pause(){},resume(){},getVoices:()=>[]}}));await capture(p,'First spoken idea');await capture(p,'Second spoken idea');
   await click(p,'#audioPlayStopToggle');assert.equal(await p.evaluate(()=>playbackActive),true);
   await click(p,'#audioPauseResumeToggle');assert.equal(await p.evaluate(()=>playbackPaused),true);
   await click(p,'#audioPauseResumeToggle');assert.equal(await p.evaluate(()=>playbackPaused),false);
