@@ -111,7 +111,14 @@
     const points=[point,...all].slice(0,24);
     try{localStorage.setItem(backupsKey,JSON.stringify(points));if(manual)success('Recovery point saved in this browser.');}catch{fail('Recovery could not be saved. Download a JSON backup now.');}
   }
-  function downloadBackup(){
+  async function downloadBackup(){
+    if(window.SpeechFlowNative){
+      try {
+        await window.SpeechFlowNative.exportFile({name:`${mapName.replace(/[^a-z0-9_-]+/gi,'-')||'speechflow'}.json`,data:getStateSnapshot(),mimeType:'application/json'});
+        result('info','Backup share sheet closed. Keep a saved JSON copy outside this app.');
+      } catch {fail('Could not share this backup. Your map is still here; please try again.');}
+      return; // A share sheet cannot prove the user saved an independent backup.
+    }
     const blob=new Blob([getStateSnapshot()],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');
     link.href=url;link.download=`${mapName.replace(/[^a-z0-9_-]+/gi,'-')||'speechflow'}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     try{const exported=JSON.parse(localStorage.getItem(exportedKey)||'{}');exported[activeMapId]=Date.now();localStorage.setItem(exportedKey,JSON.stringify(exported));}catch{}

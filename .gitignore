@@ -1,0 +1,16 @@
+node_modules/
+www/
+dist/
+.DS_Store
+*.log
+
+# Signing credentials belong in the platform keychain / secure build settings.
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+*.p8
+*.pem
+*.key
+.env
+.env.*

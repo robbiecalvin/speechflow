@@ -1,0 +1,10 @@
+/* Loaded only by the installed apps; browser styling remains independent. */
+body.native-app .workspace-header { top: env(safe-area-inset-top, 0px); }
+body.native-app .canvas-tools, body.native-app .layout-controls { top: calc(104px + env(safe-area-inset-top, 0px)); }
+body.native-app .view-switch { top: calc(104px + env(safe-area-inset-top, 0px)); }
+body.native-app #storyCaption { top: calc(99px + env(safe-area-inset-top, 0px)); }
+@media(max-width:900px) {
+  body.native-app .view-switch { top: calc(84px + env(safe-area-inset-top, 0px)); }
+  body.native-app #outlinePanel { top: calc(145px + env(safe-area-inset-top, 0px)); }
+  body.native-app #thoughtInspector { max-height: min(70dvh, calc(100dvh - 220px - env(safe-area-inset-top, 0px)), 580px); }
+}

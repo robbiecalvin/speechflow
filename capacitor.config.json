@@ -1,0 +1,9 @@
+{
+  "appId": "app.speechflow.mobile",
+  "appName": "SpeechFlow",
+  "webDir": "www",
+  "backgroundColor": "#f7f8f2",
+  "ios": { "contentInset": "never" },
+  "android": { "backgroundColor": "#f7f8f2" },
+  "plugins": { "Keyboard": { "resize": "native", "resizeOnFullScreen": true } }
+}

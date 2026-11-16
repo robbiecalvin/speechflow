@@ -76,7 +76,7 @@ Choose **Enable voice** and grant microphone permission to say **“next”** fo
 
 ## Validation
 
-No build step or application dependencies are required. Run the core regression tests with Node:
+No build step or application dependencies are required to run the browser app. Run the core regression tests with Node:
 
 ```bash
 node --test tests/voice.test.cjs tests/tutorial.test.cjs tests/recognition.test.cjs tests/workbench.test.cjs
@@ -129,9 +129,11 @@ redrawing an idle canvas. Buffers resize on size/pixel-density changes. Card
 gestures use delegated listeners, and undo retains the latest 100 snapshots;
 older edits remain available only through downloaded backups/recovery points.
 
-Run the complete automated suite with the HTTP server running:
+Run the complete automated suite, including native packaging checks, with the HTTP server running:
 
 ```bash
+npm ci
+npm run build:web
 node --test --test-concurrency=1 tests/*.test.cjs
 node tests/browser-smoke.cjs
 ```
@@ -143,3 +145,11 @@ controlled utterance completion, idle drawing, and listener/history bounds.
 Real Android/iPhone microphone permissions, on-screen keyboards, battery use,
 assistive technologies, and independent user-task completion require manual
 validation. No participant study results are claimed.
+
+## iOS and Android apps
+
+Capacitor projects are in `ios/` and `android/`, with native speech capture and
+file sharing. The static browser app still runs without npm or a build step.
+For native builds, use `npm ci`, then `npm run mobile:sync`; see [MOBILE.md](./MOBILE.md)
+for prerequisites, Android APK/App Bundle builds, Xcode signing, data transfer,
+and device-test requirements.

@@ -88,7 +88,7 @@
     });
     saveSnapshot(); fit(); notify('Thoughts arranged. Locked thoughts stay in place.');
   }
-  function exportImage() {
+  async function exportImage() {
     if (!bubbles.length) return notify('Capture a thought before exporting.');
     const padding = 64;
     const left = Math.min(...bubbles.map(b => b.x))-padding;
@@ -119,6 +119,11 @@
       words.forEach(word=>{const next=line?line+' '+word:word;if(context.measureText(next).width>b.width-30&&line){lines.push(line);line=word;}else line=next;});lines.push(line);
       lines.forEach((text,i)=>context.fillText(text,b.x+b.width/2,b.y+b.height/2+(i-(lines.length-1)/2)*18+5,b.width-24));context.restore();
     });
+    if(window.SpeechFlowNative){
+      try {await window.SpeechFlowNative.exportFile({name:(mapName.replace(/[^a-z0-9_-]+/gi,'-')||'speechflow')+'.png',data:image.toDataURL('image/png').split(',')[1],mimeType:'image/png'});notify('Image share sheet closed. Choose a destination to keep your PNG.');}
+      catch {notify('Could not share the image. Your map is still here; please try again.','error');}
+      return;
+    }
     const link=document.createElement('a');link.download=(mapName.replace(/[^a-z0-9_-]+/gi,'-')||'speechflow')+'.png';link.href=image.toDataURL('image/png');link.click();notify('Exported your complete map as a PNG.');
   }
   function changeZoom(direction) {
@@ -194,6 +199,13 @@
     $('microphoneToggle').setAttribute('aria-pressed', String(microphoneEnabled));
     $('microphoneToggle').setAttribute('aria-label', microphoneEnabled ? 'Stop microphone' : 'Start microphone');
   });
+  function stopMicrophone(){
+    microphoneEnabled=false;
+    voiceRecognitionController?.stopListening();
+    $('microphoneToggle').setAttribute('aria-pressed','false');
+    $('microphoneToggle').setAttribute('aria-label','Start microphone');
+    updateVoiceModeHint();
+  }
   function closeCommands() { $('commandsModal').classList.add('hidden'); $('commandsModal').setAttribute('aria-hidden','true'); returnFocus?.focus(); }
   function renderCommands() {
     const query = $('commandSearch').value.toLowerCase(); const results = $('commandResults'); results.replaceChildren();
@@ -281,5 +293,5 @@
     $('microphoneToggle').classList.toggle('listening', microphoneEnabled && lastKnownVoiceState==='listening');
   }, 200);
   document.body.dataset.workspaceMode = mode;
-  window.SpeechFlowWorkspace = { submit, fit, arrange, exportImage, notify, zoom:changeZoom, setMode, navigate, connect, openCommands };
+  window.SpeechFlowWorkspace = { stopMicrophone, submit, fit, arrange, exportImage, notify, zoom:changeZoom, setMode, navigate, connect, openCommands };
 })();

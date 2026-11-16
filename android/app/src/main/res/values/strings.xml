@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SpeechFlow</string>
+    <string name="title_activity_main">SpeechFlow</string>
+    <string name="package_name">app.speechflow.mobile</string>
+    <string name="custom_url_scheme">app.speechflow.mobile</string>
+</resources>

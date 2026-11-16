@@ -2401,8 +2401,9 @@ function playNextBubble() {
   b.el.style.opacity = 1;
   highlightBubble(b.el);
   const session = playbackSession;
-  const complete = () => {
+  const complete = event => {
     if (!playbackActive || session !== playbackSession) return;
+    if(event?.error){stopPlayback();window.SpeechFlowWorkspace?.notify('Speech output is unavailable. Read the thoughts in Present mode.','error');return;}
     playbackWaiting=true;
     if (playbackPaused) return;
     playbackTimer=setTimeout(()=>{if(session===playbackSession){playbackWaiting=false;playNextBubble();}},0);
@@ -3401,3 +3402,6 @@ function shuffleArray(arr) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
+
+// Native shells stop playback when backgrounded; reopening never resumes recording.
+document.addEventListener('speechflow:background',()=>{if(playbackActive)stopPlayback();});

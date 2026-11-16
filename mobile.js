@@ -145,7 +145,7 @@
   const correction=document.createElement('div');correction.className='capture-correction';correction.innerHTML='<button id="correctLast">Correct last thought</button><button id="undoCapture">Undo</button><button id="captureDone">Done typing</button><button id="showLastOnMap">Show last on map</button>';
   $('captureDock').appendChild(correction);
   $('correctLast').onclick=()=>{if(bubbles.length){inspect(bubbles.at(-1));setTimeout(()=>$('inspectorText').focus(),300);}};
-  $('undoCapture').onclick=()=>undo();$('captureDone').onclick=()=>{document.activeElement.blur();};
+  $('undoCapture').onclick=()=>undo();$('captureDone').onclick=()=>{document.activeElement.blur();window.SpeechFlowNative?.dismissKeyboard();};
   $('showLastOnMap').onclick=()=>{setView('map');selectBubbleByIndex(bubbles.length-1);};
   function viewport(){const vv=window.visualViewport;$('captureDock').style.setProperty('--keyboard-offset',`${vv?Math.max(0,innerHeight-vv.height-vv.offsetTop):0}px`);}
   window.visualViewport?.addEventListener('resize',viewport);window.visualViewport?.addEventListener('scroll',viewport);viewport();
