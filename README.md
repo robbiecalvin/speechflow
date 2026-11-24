@@ -22,6 +22,19 @@ Open `index.html` in a modern Chromium-based browser, or serve the directory:
 python3 -m http.server 8080
 ```
 
+## Install SpeechFlow on your phone or tablet
+
+Open SpeechFlow over HTTPS in your mobile browser and tap **Install SpeechFlow**
+in the workspace header.
+
+- **Android (Chrome)** — Confirm the install prompt. If the button shows
+  instructions, open Chrome's menu (⋮), choose **Add to Home screen** or
+  **Install app**, and follow the prompts.
+- **iPhone or iPad (Safari)** — Open Safari's **Share** menu and choose
+  **Add to Home Screen**. Turn on **Open as Web App** if shown, then tap **Add**.
+
+Tap the SpeechFlow icon on your Home Screen to open the web app in its own
+window. For native Android and iOS builds, see [MOBILE.md](./MOBILE.md).
 
 ## Workspace
 
