@@ -364,7 +364,7 @@ function toTitleCaseWords(input) {
 }
 
 function isAnyModalOpen() {
-  return !!document.querySelector('.modal:not(.hidden)');
+  return !!document.querySelector('.modal:not(.hidden), dialog[open]');
 }
 
 function updateVoiceModeHint() {
@@ -2189,7 +2189,7 @@ const voiceRecognitionController = voiceRecognitionModule?.createVoiceRecognitio
         const command = stripWakePhraseIfNeeded(transcript)?.trim().toLowerCase().replace(/[.!?]+$/, '');
         if (command === 'close voice settings') closeVoiceSettingsModal();
         else if (['close', 'close panel', 'cancel', 'close commands', 'close backups'].includes(command)) {
-          const modal = document.querySelector('.modal:not(.hidden)');
+          const modal = document.querySelector('.modal:not(.hidden), dialog[open]');
           modal?.querySelector('button[id^=close], #promptModalCancel, #voiceSettingsCancel')?.click();
         } else updateVoiceTranscriptDisplay('Panel open. Say “close panel” or use its close button.');
         return;

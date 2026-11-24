@@ -70,3 +70,36 @@ body { position: fixed; inset: 0; width: 100%; height: 100%; }
 @media(min-width:1201px) { .view-switch { top: 104px; right: calc(var(--ui-inspector, 0px) + 24px); } }
 @media(min-width:901px) and (max-width:1200px) { .view-switch { top: 160px; left: calc(var(--ui-sidebar) + 24px); right: auto; } #outlinePanel { top: 214px; } }
 @media(max-width:900px) { #thoughtInspector { max-height: min(70dvh, calc(100dvh - 220px), 580px); } }
+
+#installSpeechFlow {
+  flex: none;
+  min-height: 44px;
+  padding: 7px 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#installGuide {
+  width: min(400px, calc(100% - 32px));
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: #304a25;
+  background: #fcfdf9;
+}
+
+#installGuide::backdrop {
+  background: #1b302d70;
+}
+
+#installGuide h2 { margin: 0; }
+#installGuide p { line-height: 1.55; }
+#installGuide form { text-align: right; }
+#installGuide button { min-height: 44px; }
+
+@media (max-width: 400px) {
+  #installSpeechFlow { padding-inline: 7px; font-size: 10px; }
+  .workspace-header:has(#installSpeechFlow:not([hidden])) .workspace-location .eyebrow {
+    display: none;
+  }
+}

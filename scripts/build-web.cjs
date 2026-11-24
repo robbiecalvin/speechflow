@@ -7,7 +7,7 @@ async function build() {
   const output = path.join(root, 'www');
   await fs.rm(output, {recursive:true, force:true});
   await fs.mkdir(output, {recursive:true});
-  const files = ['style.css','workspace.css','ui.css','script.js','workspace.js','workbench.js','ui.js','tutorial.js','mobile.js','VERSION'];
+  const files = ['style.css','workspace.css','ui.css','script.js','workspace.js','workbench.js','ui.js','tutorial.js','mobile.js','install.js','manifest.webmanifest','VERSION'];
   for (const file of files) await fs.copyFile(path.join(root,file), path.join(output,file));
   for (const directory of ['core','assets']) await fs.cp(path.join(root,directory),path.join(output,directory),{recursive:true,filter:source=>!source.endsWith('.DS_Store')});
   await fs.copyFile(path.join(root,'native','native.css'), path.join(output,'native.css'));
