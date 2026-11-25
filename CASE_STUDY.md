@@ -32,6 +32,14 @@ Separate dictation from commands, preserve legacy maps through schema migration,
 ## Limitations
 No clinical accessibility outcomes or speech-recognition accuracy claims are established. Real-device microphone and native behavior require separate verification.
 
+## Reproducible fixture demonstration
+
+The synthetic phrase `Create bubble Ship the MVP` should preserve the label `Ship the MVP`. `connect one to two` should dispatch one graph connection, and `clear map` should leave the graph untouched when confirmation is denied. The fixture exercises parsing and dispatch with simulated input.
+
+```sh
+node --test tests/voice.test.cjs
+```
+
 ## Resume summary
 Built a voice-enabled graph workspace with intent classification, command safety controls, schema migration and automated regression tests.
 
