@@ -170,3 +170,8 @@ and device-test requirements.
 ## Engineering and evaluation
 
 The `core/` modules separate voice parsing, routing, graph state and persistence. `tests/voice.test.cjs` exercises command/dictation classification, spoken numbers, confirmation of destructive actions and state transitions. Run the focused suite with `node --test tests/voice.test.cjs`. These are source-level test cases, not a claim of independently verified speech-recognition accuracy.
+
+
+## Technical portfolio case study
+
+[Read the technical case study](CASE_STUDY.md) for the problem, architecture, engineering decisions, evaluation evidence and limitations.
