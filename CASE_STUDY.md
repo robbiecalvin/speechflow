@@ -34,3 +34,12 @@ No clinical accessibility outcomes or speech-recognition accuracy claims are est
 
 ## Resume summary
 Built a voice-enabled graph workspace with intent classification, command safety controls, schema migration and automated regression tests.
+
+## Verified CI evidence — 2026-11-25
+
+Six voice tests and eleven native packaging tests passed; web build passed. Live speech recognition and real-device behavior were not tested.
+
+- [GitHub Actions run](https://github.com/robbiecalvin/speechflow/actions/runs/45641425924)
+- [Tested revision](https://github.com/robbiecalvin/speechflow/commit/74e334f68f305bac0cc1bbad7598a17240109aa4)
+
+Results were inspected from completed job logs. They apply to the linked revision and executed checks only.
