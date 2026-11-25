@@ -166,3 +166,7 @@ file sharing. The static browser app still runs without npm or a build step.
 For native builds, use `npm ci`, then `npm run mobile:sync`; see [MOBILE.md](./MOBILE.md)
 for prerequisites, Android APK/App Bundle builds, Xcode signing, data transfer,
 and device-test requirements.
+
+## Engineering and evaluation
+
+The `core/` modules separate voice parsing, routing, graph state and persistence. `tests/voice.test.cjs` exercises command/dictation classification, spoken numbers, confirmation of destructive actions and state transitions. Run the focused suite with `node --test tests/voice.test.cjs`. These are source-level test cases, not a claim of independently verified speech-recognition accuracy.
